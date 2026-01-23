@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "foldit-conv"
+version = "0.1.0"
+description = "Coordinate format adapters for protein structure models"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+  { name = "Andreas Petrides" },
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module", "python"]
+bindings = "pyo3"
+module-name = "foldit_conv"
