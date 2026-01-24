@@ -5,11 +5,11 @@ edition = "2021"
 authors = ["Andreas Petrides"]
 description = "Coordinate format conversion library for protein structures"
 license = "MIT"
-repository = "https://github.com/anthropics/foldit-conv"
+repository = "https://github.com/petridecus/foldit-conv"
 
 [lib]
 name = "foldit_conv"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 pyo3-build-config = "0.27"
