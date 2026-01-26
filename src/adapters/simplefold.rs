@@ -76,6 +76,11 @@ fn boltz_structure_to_coords(
 ) -> Result<Vec<u8>, SimpleFoldError> {
     let py = structure.py();
 
+    // Import numpy for making arrays contiguous
+    let numpy = py
+        .import("numpy")
+        .map_err(|e| SimpleFoldError::ConversionError(format!("Failed to import numpy: {}", e)))?;
+
     // Get atoms structured numpy array
     let atoms_array = structure
         .getattr("atoms")
@@ -91,10 +96,88 @@ fn boltz_structure_to_coords(
         ));
     }
 
-    // Import numpy for making arrays contiguous
-    let numpy = py
-        .import("numpy")
-        .map_err(|e| SimpleFoldError::ConversionError(format!("Failed to import numpy: {}", e)))?;
+    // Get residues array
+    let residues_array = structure
+        .getattr("residues")
+        .map_err(|e| SimpleFoldError::ConversionError(format!("Failed to get 'residues': {}", e)))?;
+
+    let n_residues: usize = residues_array.len().map_err(|e| {
+        SimpleFoldError::ConversionError(format!("Failed to get residues length: {}", e))
+    })?;
+
+    // Extract atom_idx and atom_num fields from residues array to correctly map atoms to residues
+    // Different amino acids have different atom counts (Gly ~5, Trp ~20), so we can't assume uniform counts
+    let atom_idx_field = residues_array
+        .call_method1("__getitem__", ("atom_idx",))
+        .map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to get residue atom_idx: {}", e))
+        })?;
+    let atom_num_field = residues_array
+        .call_method1("__getitem__", ("atom_num",))
+        .map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to get residue atom_num: {}", e))
+        })?;
+
+    // Build a mapping from atom index to residue index
+    // atom_idx[res_i] = starting atom index for residue res_i
+    // atom_num[res_i] = number of atoms in residue res_i
+    let mut atom_to_residue: Vec<usize> = vec![0; n_atoms];
+    for res_i in 0..n_residues {
+        let atom_start: i64 = atom_idx_field.get_item(res_i).map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to get atom_idx[{}]: {}", res_i, e))
+        })?.extract().map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to extract atom_idx[{}]: {}", res_i, e))
+        })?;
+        let atom_count: i64 = atom_num_field.get_item(res_i).map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to get atom_num[{}]: {}", res_i, e))
+        })?.extract().map_err(|e| {
+            SimpleFoldError::ConversionError(format!("Failed to extract atom_num[{}]: {}", res_i, e))
+        })?;
+
+        for atom_i in atom_start..(atom_start + atom_count) {
+            if (atom_i as usize) < n_atoms {
+                atom_to_residue[atom_i as usize] = res_i;
+            }
+        }
+    }
+
+    // Get residue names from the residues array
+    // Boltz Residue dtype has: name (U5 string with 3-letter codes like 'ASP'), res_type (i1 integer)
+    // The 'name' field already contains correct 3-letter codes, so use it directly
+    println!("[RUST simplefold.rs] Extracting residue names from {} residues", n_residues);
+    let res_names_list: Vec<[u8; 3]> = {
+        let mut names = Vec::with_capacity(n_residues);
+
+        // Use the 'name' field directly - it contains correct 3-letter amino acid codes
+        let res_name_field = residues_array
+            .call_method1("__getitem__", ("name",))
+            .map_err(|e| SimpleFoldError::ConversionError(format!("Failed to get residue name: {}", e)))?;
+
+        for i in 0..n_residues {
+            let item = res_name_field.get_item(i).map_err(|e| {
+                SimpleFoldError::ConversionError(format!("Failed to get residue name at {}: {}", i, e))
+            })?;
+            // Extract as string - Boltz stores names as Unicode strings like 'ASP', 'ILE', etc.
+            // Need to call str() on numpy scalar to get Python string first
+            let name_str: String = item.str()
+                .and_then(|s| s.extract())
+                .unwrap_or_else(|e| {
+                    if i < 5 {
+                        println!("[RUST] Failed to extract residue name at {}: {:?}", i, e);
+                    }
+                    "UNK".to_string()
+                });
+            if i < 5 {
+                println!("[RUST] Residue {}: name='{}'", i, name_str);
+            }
+            let mut name_bytes = [b' '; 3];
+            for (j, b) in name_str.as_bytes().iter().take(3).enumerate() {
+                name_bytes[j] = *b;
+            }
+            names.push(name_bytes);
+        }
+        names
+    };
 
     // Extract pLDDT array if provided
     let plddt_vec: Option<Vec<f32>> = if let Some(p) = plddt {
@@ -186,7 +269,8 @@ fn boltz_structure_to_coords(
     let mut res_nums = Vec::with_capacity(valid_count);
     let mut atom_names = Vec::with_capacity(valid_count);
 
-    let mut current_res_idx: i32 = 0;
+    // Check if this is atom37 format (37 atoms per residue)
+    let is_atom37 = n_atoms == n_residues * 37;
 
     for i in 0..n_atoms {
         if !is_present_slice[i] {
@@ -203,19 +287,46 @@ fn boltz_structure_to_coords(
             continue;
         }
 
-        // Extract and decode atom name from Boltz encoding
-        let encoded_name: [i8; 4] = [
-            name_slice[i * 4],
-            name_slice[i * 4 + 1],
-            name_slice[i * 4 + 2],
-            name_slice[i * 4 + 3],
-        ];
-        let decoded_name = decode_boltz_atom_name(&encoded_name);
+        // Determine residue index and atom name
+        let (res_idx, atom_name_bytes): (i32, [u8; 4]) = if is_atom37 {
+            // atom37 format: atom type determined by position within residue
+            let residue_idx = (i / 37) as i32;
+            let atom_type_idx = i % 37;
+            let atom_name = ATOM37_NAMES.get(atom_type_idx).unwrap_or(&"X");
+            let mut name_bytes = [b' '; 4];
+            for (j, b) in atom_name.as_bytes().iter().take(4).enumerate() {
+                name_bytes[j] = *b;
+            }
+            (residue_idx, name_bytes)
+        } else {
+            // Variable format: use atom_to_residue mapping and decode name field
+            let residue_idx = atom_to_residue[i] as i32;
+            let encoded_name: [i8; 4] = [
+                name_slice[i * 4],
+                name_slice[i * 4 + 1],
+                name_slice[i * 4 + 2],
+                name_slice[i * 4 + 3],
+            ];
+            // Debug: check if the name field contains atom type indices instead of encoded chars
+            // If first byte is small (0-36), it's likely an atom type index
+            if i < 5 {
+                eprintln!("DEBUG atom {}: encoded_name bytes = [{}, {}, {}, {}]",
+                    i, encoded_name[0], encoded_name[1], encoded_name[2], encoded_name[3]);
+            }
+            (residue_idx, decode_boltz_atom_name(&encoded_name))
+        };
+        let decoded_name = atom_name_bytes;
+
+        // Debug: print first few decoded atom names
+        if i < 5 {
+            let name_str = std::str::from_utf8(&decoded_name).unwrap_or("???");
+            eprintln!("DEBUG atom {}: decoded_name = '{}' (bytes: {:?})", i, name_str.trim(), decoded_name);
+        }
 
         // Get B-factor from pLDDT if available (per-residue)
         let b_factor = plddt_vec
             .as_ref()
-            .and_then(|p| p.get(current_res_idx as usize).copied())
+            .and_then(|p| p.get(res_idx as usize).copied())
             .map(|plddt_val| (1.0 - plddt_val) * 100.0)
             .unwrap_or(0.0);
 
@@ -227,19 +338,13 @@ fn boltz_structure_to_coords(
             b_factor,
         });
 
-        chain_ids.push(b'A'); // TODO: extract from chains if available
+        chain_ids.push(b'A');
 
-        // Use UNK for residue name (Boltz Structure doesn't provide this directly)
-        res_names.push(*b"UNK");
-
-        res_nums.push(current_res_idx + 1);
-
+        // Get residue name from the residues array
+        let res_name_bytes = res_names_list.get(res_idx as usize).copied().unwrap_or(*b"UNK");
+        res_names.push(res_name_bytes);
+        res_nums.push(res_idx);
         atom_names.push(decoded_name);
-
-        // Increment residue index when we see N atom (backbone nitrogen)
-        if &decoded_name == b"N   " {
-            current_res_idx += 1;
-        }
     }
 
     if atoms.is_empty() {
