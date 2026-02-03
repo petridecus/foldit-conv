@@ -20,6 +20,7 @@ numpy = { version = "0.27", optional = true }
 ndarray = "0.15"
 pdbtbx = "0.12"
 thiserror = "1.0"
+glam = "0.30"
 
 [features]
 default = []

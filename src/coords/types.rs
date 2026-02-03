@@ -46,3 +46,28 @@ pub struct AtomMetadata {
     /// B-factors (can drive sphere size/opacity)
     pub b_factors: Vec<f32>,
 }
+
+/// Atoms present in a single residue (for validation).
+#[derive(Debug, Clone)]
+pub struct ResidueAtoms {
+    pub chain_id: u8,
+    pub res_num: i32,
+    pub res_name: [u8; 3],
+    /// Atom names present in this residue
+    pub atoms: Vec<[u8; 4]>,
+}
+
+/// Result of validating COORDS completeness.
+#[derive(Debug, Clone)]
+pub struct ValidationResult {
+    /// Whether all expected atoms are present
+    pub is_complete: bool,
+    /// Missing atoms: (res_num, res_name, list of missing atom names)
+    pub missing_atoms: Vec<(i32, String, Vec<String>)>,
+    /// Unexpected atoms: (res_num, res_name, list of extra atom names)
+    pub extra_atoms: Vec<(i32, String, Vec<String>)>,
+    /// Total residues checked
+    pub total_residues: usize,
+    /// Residues with missing atoms
+    pub incomplete_residues: usize,
+}
