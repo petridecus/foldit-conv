@@ -38,8 +38,9 @@ pub use validation::{
 };
 pub use transform::{
     align_coords_bytes, align_to_reference, backbone_only, centroid, extract_backbone_chains,
-    extract_ca_from_chains, extract_ca_positions, filter_atoms, heavy_atoms_only,
-    kabsch_alignment, kabsch_alignment_with_scale, transform_coords, transform_coords_with_scale,
+    extract_ca_from_chains, extract_ca_positions, filter_atoms, filter_residues, heavy_atoms_only,
+    kabsch_alignment, kabsch_alignment_with_scale, protein_only, transform_coords,
+    transform_coords_with_scale,
 };
 
 // Re-export Python functions at module level for lib.rs registration

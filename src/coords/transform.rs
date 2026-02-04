@@ -133,6 +133,50 @@ pub fn filter_atoms(coords: &Coords, predicate: impl Fn(&[u8; 4]) -> bool) -> Co
     }
 }
 
+/// Filter atoms by predicate on residue name.
+pub fn filter_residues(coords: &Coords, predicate: impl Fn(&[u8; 3]) -> bool) -> Coords {
+    let mut atoms = Vec::new();
+    let mut chain_ids = Vec::new();
+    let mut res_names = Vec::new();
+    let mut res_nums = Vec::new();
+    let mut atom_names = Vec::new();
+
+    for i in 0..coords.num_atoms {
+        if predicate(&coords.res_names[i]) {
+            atoms.push(coords.atoms[i].clone());
+            chain_ids.push(coords.chain_ids[i]);
+            res_names.push(coords.res_names[i]);
+            res_nums.push(coords.res_nums[i]);
+            atom_names.push(coords.atom_names[i]);
+        }
+    }
+
+    Coords {
+        num_atoms: atoms.len(),
+        atoms,
+        chain_ids,
+        res_names,
+        res_nums,
+        atom_names,
+    }
+}
+
+/// Standard amino acid residue names
+const PROTEIN_RESIDUES: &[&str] = &[
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    // Non-standard but protein-like
+    "MSE", "SEC", "PYL",
+];
+
+/// Filter COORDS to only protein residues (remove water, ligands, etc.).
+pub fn protein_only(coords: &Coords) -> Coords {
+    filter_residues(coords, |res_name| {
+        let name_str = std::str::from_utf8(res_name).unwrap_or("").trim();
+        PROTEIN_RESIDUES.contains(&name_str)
+    })
+}
+
 /// Compute centroid of a point set.
 pub fn centroid(points: &[Vec3]) -> Vec3 {
     if points.is_empty() {
