@@ -11,16 +11,35 @@ use super::types::{Coords, CoordsAtom, CoordsError};
 
 /// Parse PDB format string to COORDS binary format.
 pub fn pdb_to_coords(pdb_str: &str) -> Result<Vec<u8>, CoordsError> {
-    parse_structure(pdb_str, Format::Pdb)
+    let coords = parse_structure_to_coords(pdb_str, Format::Pdb)?;
+    binary::serialize(&coords)
 }
 
 /// Parse mmCIF format string to COORDS binary format.
 pub fn mmcif_to_coords(cif_str: &str) -> Result<Vec<u8>, CoordsError> {
-    parse_structure(cif_str, Format::Mmcif)
+    let coords = parse_structure_to_coords(cif_str, Format::Mmcif)?;
+    binary::serialize(&coords)
+}
+
+/// Parse PDB format string directly to Coords struct.
+pub fn pdb_str_to_coords(pdb_str: &str) -> Result<Coords, CoordsError> {
+    parse_structure_to_coords(pdb_str, Format::Pdb)
+}
+
+/// Parse mmCIF format string directly to Coords struct.
+pub fn mmcif_str_to_coords(cif_str: &str) -> Result<Coords, CoordsError> {
+    parse_structure_to_coords(cif_str, Format::Mmcif)
+}
+
+/// Load mmCIF file directly to Coords struct.
+pub fn mmcif_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| CoordsError::PdbParseError(format!("Failed to read file: {}", e)))?;
+    parse_structure_to_coords(&content, Format::Mmcif)
 }
 
 /// Internal function to parse either PDB or mmCIF using pdbtbx.
-fn parse_structure(input: &str, format: Format) -> Result<Vec<u8>, CoordsError> {
+fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, CoordsError> {
     let reader = BufReader::new(input.as_bytes());
 
     let (pdb, _errors) = ReadOptions::new()
@@ -85,16 +104,14 @@ fn parse_structure(input: &str, format: Format) -> Result<Vec<u8>, CoordsError> 
         ));
     }
 
-    let coords = Coords {
+    Ok(Coords {
         num_atoms: atoms.len(),
         atoms,
         chain_ids,
         res_names,
         res_nums,
         atom_names,
-    };
-
-    binary::serialize(&coords)
+    })
 }
 
 /// Convert COORDS binary to PDB format string.

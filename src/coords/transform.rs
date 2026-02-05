@@ -86,6 +86,158 @@ pub fn extract_ca_from_chains(chains: &[Vec<Vec3>]) -> Vec<Vec3> {
     ca_positions
 }
 
+/// Get a single CA position by residue index from backbone chains.
+/// Returns None if residue_idx is out of bounds.
+pub fn get_ca_position_from_chains(chains: &[Vec<Vec3>], residue_idx: usize) -> Option<Vec3> {
+    let mut current_idx = 0;
+    for chain in chains {
+        let residues_in_chain = chain.len() / 3;
+        if residue_idx < current_idx + residues_in_chain {
+            let local_idx = residue_idx - current_idx;
+            let ca_idx = local_idx * 3 + 1; // CA is at index 1 in (N, CA, C)
+            return chain.get(ca_idx).copied();
+        }
+        current_idx += residues_in_chain;
+    }
+    None
+}
+
+/// Get all backbone atom positions (N, CA, C) for a residue by index.
+/// Returns None if residue_idx is out of bounds.
+pub fn get_backbone_atoms_from_chains(chains: &[Vec<Vec3>], residue_idx: usize) -> Option<(Vec3, Vec3, Vec3)> {
+    let mut current_idx = 0;
+    for chain in chains {
+        let residues_in_chain = chain.len() / 3;
+        if residue_idx < current_idx + residues_in_chain {
+            let local_idx = residue_idx - current_idx;
+            let base_idx = local_idx * 3;
+            let n = chain.get(base_idx).copied()?;
+            let ca = chain.get(base_idx + 1).copied()?;
+            let c = chain.get(base_idx + 2).copied()?;
+            return Some((n, ca, c));
+        }
+        current_idx += residues_in_chain;
+    }
+    None
+}
+
+/// Get the closest backbone atom position to a reference point for a residue.
+/// Returns the position of N, CA, or C - whichever is closest to `reference_point`.
+/// Returns None if residue_idx is out of bounds.
+pub fn get_closest_backbone_atom(
+    chains: &[Vec<Vec3>],
+    residue_idx: usize,
+    reference_point: Vec3,
+) -> Option<Vec3> {
+    let (n, ca, c) = get_backbone_atoms_from_chains(chains, residue_idx)?;
+
+    let dist_n = n.distance_squared(reference_point);
+    let dist_ca = ca.distance_squared(reference_point);
+    let dist_c = c.distance_squared(reference_point);
+
+    if dist_n <= dist_ca && dist_n <= dist_c {
+        Some(n)
+    } else if dist_ca <= dist_c {
+        Some(ca)
+    } else {
+        Some(c)
+    }
+}
+
+/// Get the closest atom (backbone or sidechain) to a reference point for a residue.
+///
+/// # Arguments
+/// * `chains` - Backbone chains with (N, CA, C) triplets per residue
+/// * `sidechain_positions` - All sidechain atom positions
+/// * `sidechain_residue_indices` - Residue index for each sidechain atom
+/// * `residue_idx` - The residue to find the closest atom for (0-indexed)
+/// * `reference_point` - The point to measure distance from
+///
+/// Returns the position of the closest atom (backbone N/CA/C or any sidechain atom).
+/// Returns None if residue_idx is out of bounds.
+pub fn get_closest_atom_for_residue(
+    chains: &[Vec<Vec3>],
+    sidechain_positions: &[Vec3],
+    sidechain_residue_indices: &[u32],
+    residue_idx: usize,
+    reference_point: Vec3,
+) -> Option<Vec3> {
+    let mut closest: Option<(Vec3, f32)> = None;
+
+    // Check backbone atoms (N, CA, C)
+    if let Some((n, ca, c)) = get_backbone_atoms_from_chains(chains, residue_idx) {
+        for pos in [n, ca, c] {
+            let dist = pos.distance_squared(reference_point);
+            if closest.is_none() || dist < closest.unwrap().1 {
+                closest = Some((pos, dist));
+            }
+        }
+    }
+
+    // Check sidechain atoms for this residue
+    for (i, &res_idx) in sidechain_residue_indices.iter().enumerate() {
+        if res_idx as usize == residue_idx {
+            if let Some(&pos) = sidechain_positions.get(i) {
+                let dist = pos.distance_squared(reference_point);
+                if closest.is_none() || dist < closest.unwrap().1 {
+                    closest = Some((pos, dist));
+                }
+            }
+        }
+    }
+
+    closest.map(|(pos, _)| pos)
+}
+
+/// Find the closest atom to a reference point within a residue, returning both position and atom name.
+///
+/// This is similar to `get_closest_atom_for_residue` but also returns the atom name,
+/// which is useful for tracking atoms by identity during animation.
+///
+/// # Arguments
+/// * `chains` - Backbone chains with (N, CA, C) triplets per residue
+/// * `sidechain_positions` - All sidechain atom positions
+/// * `sidechain_residue_indices` - Residue index for each sidechain atom
+/// * `sidechain_atom_names` - Atom name for each sidechain atom
+/// * `residue_idx` - The residue to find the closest atom for (0-indexed)
+/// * `reference_point` - The point to measure distance from
+///
+/// Returns (position, atom_name) of the closest atom, or None if residue_idx is out of bounds.
+pub fn get_closest_atom_with_name(
+    chains: &[Vec<Vec3>],
+    sidechain_positions: &[Vec3],
+    sidechain_residue_indices: &[u32],
+    sidechain_atom_names: &[String],
+    residue_idx: usize,
+    reference_point: Vec3,
+) -> Option<(Vec3, String)> {
+    let mut closest: Option<(Vec3, String, f32)> = None;
+
+    // Check backbone atoms (N, CA, C)
+    if let Some((n, ca, c)) = get_backbone_atoms_from_chains(chains, residue_idx) {
+        for (pos, name) in [(n, "N"), (ca, "CA"), (c, "C")] {
+            let dist = pos.distance_squared(reference_point);
+            if closest.is_none() || dist < closest.as_ref().unwrap().2 {
+                closest = Some((pos, name.to_string(), dist));
+            }
+        }
+    }
+
+    // Check sidechain atoms for this residue
+    for (i, &res_idx) in sidechain_residue_indices.iter().enumerate() {
+        if res_idx as usize == residue_idx {
+            if let (Some(&pos), Some(name)) = (sidechain_positions.get(i), sidechain_atom_names.get(i)) {
+                let dist = pos.distance_squared(reference_point);
+                if closest.is_none() || dist < closest.as_ref().unwrap().2 {
+                    closest = Some((pos, name.clone(), dist));
+                }
+            }
+        }
+    }
+
+    closest.map(|(pos, name, _)| (pos, name))
+}
+
 /// Filter COORDS to only heavy atoms (exclude hydrogens).
 pub fn heavy_atoms_only(coords: &Coords) -> Coords {
     filter_atoms(coords, |name| {
@@ -573,9 +725,214 @@ fn orthonormalize(m: &mut [[f32; 3]; 3]) {
     }
 }
 
+/// Linear interpolation between two Coords instances.
+/// Both must have the same number of atoms in the same order.
+/// Returns None if the two Coords have different atom counts.
+///
+/// This is the foundation for animation - interpolating all atom positions
+/// from a start state to an end state.
+pub fn interpolate_coords(start: &Coords, end: &Coords, t: f32) -> Option<Coords> {
+    if start.num_atoms != end.num_atoms {
+        return None;
+    }
+
+    let t = t.clamp(0.0, 1.0);
+    let one_minus_t = 1.0 - t;
+
+    let atoms = start
+        .atoms
+        .iter()
+        .zip(end.atoms.iter())
+        .map(|(s, e)| super::types::CoordsAtom {
+            x: s.x * one_minus_t + e.x * t,
+            y: s.y * one_minus_t + e.y * t,
+            z: s.z * one_minus_t + e.z * t,
+            occupancy: s.occupancy * one_minus_t + e.occupancy * t,
+            b_factor: s.b_factor * one_minus_t + e.b_factor * t,
+        })
+        .collect();
+
+    Some(Coords {
+        num_atoms: start.num_atoms,
+        atoms,
+        // Metadata stays the same (from start, though they should match)
+        chain_ids: start.chain_ids.clone(),
+        res_names: start.res_names.clone(),
+        res_nums: start.res_nums.clone(),
+        atom_names: start.atom_names.clone(),
+    })
+}
+
+/// Interpolate Coords with a collapse/expand effect through a collapse point.
+/// Used for mutation animations where atoms collapse toward the CA and then expand.
+///
+/// - For t in [0.0, 0.5]: positions collapse from `start` toward `collapse_point`
+/// - For t in [0.5, 1.0]: positions expand from `collapse_point` toward `end`
+///
+/// The `collapse_fn` takes a residue index and returns the collapse point (typically CA position).
+pub fn interpolate_coords_collapse<F>(
+    start: &Coords,
+    end: &Coords,
+    t: f32,
+    collapse_fn: F,
+) -> Option<Coords>
+where
+    F: Fn(i32, u8) -> Vec3, // (res_num, chain_id) -> collapse point
+{
+    if start.num_atoms != end.num_atoms {
+        return None;
+    }
+
+    let t = t.clamp(0.0, 1.0);
+
+    let atoms = start
+        .atoms
+        .iter()
+        .zip(end.atoms.iter())
+        .enumerate()
+        .map(|(i, (s, e))| {
+            let start_pos = Vec3::new(s.x, s.y, s.z);
+            let end_pos = Vec3::new(e.x, e.y, e.z);
+            let collapse_point = collapse_fn(start.res_nums[i], start.chain_ids[i]);
+
+            let interpolated = if t < 0.5 {
+                // Collapse phase: start -> collapse_point
+                let phase_t = t * 2.0;
+                start_pos.lerp(collapse_point, phase_t)
+            } else {
+                // Expand phase: collapse_point -> end
+                let phase_t = (t - 0.5) * 2.0;
+                collapse_point.lerp(end_pos, phase_t)
+            };
+
+            super::types::CoordsAtom {
+                x: interpolated.x,
+                y: interpolated.y,
+                z: interpolated.z,
+                occupancy: s.occupancy * (1.0 - t) + e.occupancy * t,
+                b_factor: s.b_factor * (1.0 - t) + e.b_factor * t,
+            }
+        })
+        .collect();
+
+    Some(Coords {
+        num_atoms: start.num_atoms,
+        atoms,
+        chain_ids: start.chain_ids.clone(),
+        res_names: start.res_names.clone(),
+        res_nums: start.res_nums.clone(),
+        atom_names: start.atom_names.clone(),
+    })
+}
+
+/// Get atom position by index.
+pub fn get_atom_position(coords: &Coords, index: usize) -> Option<Vec3> {
+    coords.atoms.get(index).map(|a| Vec3::new(a.x, a.y, a.z))
+}
+
+/// Set atom position by index.
+pub fn set_atom_position(coords: &mut Coords, index: usize, pos: Vec3) {
+    if let Some(atom) = coords.atoms.get_mut(index) {
+        atom.x = pos.x;
+        atom.y = pos.y;
+        atom.z = pos.z;
+    }
+}
+
+/// Get position of a specific atom by residue number, chain ID, and atom name.
+pub fn get_atom_by_name(coords: &Coords, res_num: i32, chain_id: u8, atom_name: &str) -> Option<Vec3> {
+    for i in 0..coords.num_atoms {
+        if coords.res_nums[i] == res_num && coords.chain_ids[i] == chain_id {
+            let name = std::str::from_utf8(&coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+            if name == atom_name {
+                return Some(Vec3::new(
+                    coords.atoms[i].x,
+                    coords.atoms[i].y,
+                    coords.atoms[i].z,
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Get CA position for a specific residue by residue number and chain ID.
+pub fn get_ca_for_residue(coords: &Coords, res_num: i32, chain_id: u8) -> Option<Vec3> {
+    get_atom_by_name(coords, res_num, chain_id, "CA")
+}
+
+/// Build a map of (chain_id, res_num) -> CA position for efficient lookup.
+pub fn build_ca_position_map(coords: &Coords) -> std::collections::HashMap<(u8, i32), Vec3> {
+    let mut map = std::collections::HashMap::new();
+    for i in 0..coords.num_atoms {
+        let name = std::str::from_utf8(&coords.atom_names[i])
+            .unwrap_or("")
+            .trim();
+        if name == "CA" {
+            let key = (coords.chain_ids[i], coords.res_nums[i]);
+            map.insert(key, Vec3::new(
+                coords.atoms[i].x,
+                coords.atoms[i].y,
+                coords.atoms[i].z,
+            ));
+        }
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_interpolate_coords() {
+        let start = Coords {
+            num_atoms: 2,
+            atoms: vec![
+                super::super::types::CoordsAtom {
+                    x: 0.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
+                },
+                super::super::types::CoordsAtom {
+                    x: 1.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
+                },
+            ],
+            chain_ids: vec![b'A', b'A'],
+            res_names: vec![*b"ALA", *b"ALA"],
+            res_nums: vec![1, 1],
+            atom_names: vec![*b"N   ", *b"CA  "],
+        };
+
+        let end = Coords {
+            num_atoms: 2,
+            atoms: vec![
+                super::super::types::CoordsAtom {
+                    x: 0.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
+                },
+                super::super::types::CoordsAtom {
+                    x: 1.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
+                },
+            ],
+            chain_ids: vec![b'A', b'A'],
+            res_names: vec![*b"ALA", *b"ALA"],
+            res_nums: vec![1, 1],
+            atom_names: vec![*b"N   ", *b"CA  "],
+        };
+
+        // Test t=0.5
+        let mid = interpolate_coords(&start, &end, 0.5).unwrap();
+        assert!((mid.atoms[0].y - 5.0).abs() < 0.001);
+        assert!((mid.atoms[1].y - 5.0).abs() < 0.001);
+
+        // Test t=0
+        let at_start = interpolate_coords(&start, &end, 0.0).unwrap();
+        assert!((at_start.atoms[0].y - 0.0).abs() < 0.001);
+
+        // Test t=1
+        let at_end = interpolate_coords(&start, &end, 1.0).unwrap();
+        assert!((at_end.atoms[0].y - 10.0).abs() < 0.001);
+    }
 
     #[test]
     fn test_centroid() {

@@ -11,6 +11,7 @@
 pub mod binary;
 pub mod gpu;
 pub mod pdb;
+pub mod render;
 pub mod transform;
 pub mod types;
 pub mod validation;
@@ -28,7 +29,8 @@ pub use gpu::{
     to_positions_flat as coords_to_positions_flat,
 };
 pub use pdb::{
-    coords_to_pdb as coords_bytes_to_pdb, mmcif_to_coords as mmcif_to_coords_internal,
+    coords_to_pdb as coords_bytes_to_pdb, mmcif_file_to_coords, mmcif_str_to_coords,
+    mmcif_to_coords as mmcif_to_coords_internal, pdb_str_to_coords,
     pdb_to_coords as pdb_to_coords_internal,
 };
 pub use types::{AtomMetadata, Coords, CoordsAtom, CoordsError, ResidueAtoms, ValidationResult};
@@ -37,11 +39,15 @@ pub use validation::{
     has_complete_backbone, validate_completeness, AtomCounts,
 };
 pub use transform::{
-    align_coords_bytes, align_to_reference, backbone_only, centroid, extract_backbone_chains,
-    extract_ca_from_chains, extract_ca_positions, filter_atoms, filter_residues, heavy_atoms_only,
-    kabsch_alignment, kabsch_alignment_with_scale, protein_only, transform_coords,
-    transform_coords_with_scale,
+    align_coords_bytes, align_to_reference, backbone_only, build_ca_position_map, centroid,
+    extract_backbone_chains, extract_ca_from_chains, extract_ca_positions, filter_atoms,
+    filter_residues, get_atom_by_name, get_atom_position, get_backbone_atoms_from_chains,
+    get_ca_for_residue, get_ca_position_from_chains, get_closest_atom_for_residue,
+    get_closest_atom_with_name, get_closest_backbone_atom, heavy_atoms_only, interpolate_coords,
+    interpolate_coords_collapse, kabsch_alignment, kabsch_alignment_with_scale, protein_only,
+    set_atom_position, transform_coords, transform_coords_with_scale,
 };
+pub use render::{extract_sequences, RenderBackboneResidue, RenderCoords, RenderSidechainAtom};
 
 // Re-export Python functions at module level for lib.rs registration
 #[cfg(feature = "python")]
