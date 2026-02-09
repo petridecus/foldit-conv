@@ -6,19 +6,18 @@ use pdbtbx::{
 };
 use std::io::BufReader;
 
-use super::binary;
-use super::types::{Coords, CoordsAtom, CoordsError};
+use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, CoordsError, Element};
 
 /// Parse PDB format string to COORDS binary format.
 pub fn pdb_to_coords(pdb_str: &str) -> Result<Vec<u8>, CoordsError> {
     let coords = parse_structure_to_coords(pdb_str, Format::Pdb)?;
-    binary::serialize(&coords)
+    serialize(&coords)
 }
 
 /// Parse mmCIF format string to COORDS binary format.
 pub fn mmcif_to_coords(cif_str: &str) -> Result<Vec<u8>, CoordsError> {
     let coords = parse_structure_to_coords(cif_str, Format::Mmcif)?;
-    binary::serialize(&coords)
+    serialize(&coords)
 }
 
 /// Parse PDB format string directly to Coords struct.
@@ -60,6 +59,7 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
     let mut res_names = Vec::new();
     let mut res_nums = Vec::new();
     let mut atom_names = Vec::new();
+    let mut elements = Vec::new();
 
     for hier in pdb.atoms_with_hierarchy() {
         let atom = hier.atom();
@@ -75,10 +75,8 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
             b_factor: atom.b_factor() as f32,
         });
 
-        // Chain ID (first char of chain id string, default to 'A')
         chain_ids.push(chain.id().bytes().next().unwrap_or(b'A'));
 
-        // Residue name from conformer
         let name = conformer.name();
         let mut res_name_bytes = [b' '; 3];
         for (i, b) in name.bytes().take(3).enumerate() {
@@ -86,16 +84,20 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
         }
         res_names.push(res_name_bytes);
 
-        // Residue number
         res_nums.push(residue.serial_number() as i32);
 
-        // Atom name
         let aname = atom.name();
         let mut atom_name_bytes = [b' '; 4];
         for (i, b) in aname.bytes().take(4).enumerate() {
             atom_name_bytes[i] = b;
         }
         atom_names.push(atom_name_bytes);
+
+        let elem = atom.element().map_or_else(
+            || Element::from_atom_name(aname),
+            |e| Element::from_symbol(e.symbol()),
+        );
+        elements.push(elem);
     }
 
     if atoms.is_empty() {
@@ -111,12 +113,13 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
         res_names,
         res_nums,
         atom_names,
+        elements,
     })
 }
 
 /// Convert COORDS binary to PDB format string.
 pub fn coords_to_pdb(coords_bytes: &[u8]) -> Result<String, CoordsError> {
-    let coords = binary::deserialize(coords_bytes)?;
+    let coords = deserialize(coords_bytes)?;
 
     let mut pdb_string = String::new();
 
@@ -125,11 +128,9 @@ pub fn coords_to_pdb(coords_bytes: &[u8]) -> Result<String, CoordsError> {
         let chain_id = coords.chain_ids[i] as char;
         let res_num = coords.res_nums[i];
 
-        // Convert byte arrays to strings, trimming whitespace
         let atom_name = std::str::from_utf8(&coords.atom_names[i]).unwrap_or("X   ");
         let res_name = std::str::from_utf8(&coords.res_names[i]).unwrap_or("UNK");
 
-        // PDB format per spec v3.3
         pdb_string.push_str(&format!(
             "ATOM  {:>5} {:<4} {:>3} {}{:>4}    {:>8.3}{:>8.3}{:>8.3}{:>6.2}{:>6.2}\n",
             i + 1,

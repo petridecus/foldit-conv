@@ -5,12 +5,12 @@
 
 use pyo3::prelude::*;
 
-use crate::coords::{binary, Coords, CoordsAtom};
+use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, Element};
 
 /// Convert COORDS bytes directly to a Biotite AtomArray object.
 #[pyfunction]
 pub fn coords_to_biotite_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
-    let coords = binary::deserialize(&coords_bytes)
+    let coords = deserialize(&coords_bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     let num_atoms = coords.num_atoms;
@@ -37,16 +37,16 @@ pub fn coords_to_biotite_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResu
     let coord_np = coord_np.call_method1("astype", (numpy.getattr("float32")?,))?;
     atom_array.setattr("coord", coord_np)?;
 
-    // Chain IDs
-    let chain_ids: Vec<&str> = coords
+    // Chain IDs — convert each byte to its ASCII character
+    let chain_ids: Vec<String> = coords
         .chain_ids
         .iter()
-        .map(|&c| match c as char {
-            'A' => "A",
-            'B' => "B",
-            'C' => "C",
-            'D' => "D",
-            _ => "A",
+        .map(|&c| {
+            if c.is_ascii_alphanumeric() {
+                String::from(c as char)
+            } else {
+                "A".to_string()
+            }
         })
         .collect();
     let chain_np = numpy.call_method1("array", (chain_ids,))?;
@@ -169,6 +169,11 @@ pub fn atom_array_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u
         atom_names_vec.push(atom_name_bytes);
     }
 
+    let elements = atom_names_vec.iter().map(|n| {
+        let s = std::str::from_utf8(n).unwrap_or("");
+        Element::from_atom_name(s)
+    }).collect();
+
     let coords = Coords {
         num_atoms,
         atoms,
@@ -176,8 +181,9 @@ pub fn atom_array_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u
         res_names,
         res_nums,
         atom_names: atom_names_vec,
+        elements,
     };
 
-    binary::serialize(&coords)
+    serialize(&coords)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }

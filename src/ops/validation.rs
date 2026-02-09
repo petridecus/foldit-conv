@@ -3,7 +3,7 @@
 //! Provides functions to check what atoms are present in COORDS data
 //! and validate completeness against expected residue types.
 
-use super::types::{Coords, ResidueAtoms, ValidationResult};
+use crate::types::coords::{Coords, ResidueAtoms, ValidationResult};
 use std::collections::{HashMap, HashSet};
 
 /// Expected heavy atoms for each standard amino acid residue type.
@@ -30,7 +30,6 @@ pub fn expected_heavy_atoms(res_name: &str) -> &'static [&'static str] {
         "TRP" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1", "CE2", "CE3", "CZ2", "CZ3", "CH2"],
         "TYR" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "OH"],
         "VAL" => &["N", "CA", "C", "O", "CB", "CG1", "CG2"],
-        // Unknown residues - just backbone
         _ => &["N", "CA", "C", "O"],
     }
 }
@@ -63,7 +62,6 @@ pub fn atoms_by_residue(coords: &Coords) -> Vec<ResidueAtoms> {
             .push(atom_name);
     }
 
-    // Sort by chain and residue number
     let mut residues: Vec<ResidueAtoms> = residue_map.into_values().collect();
     residues.sort_by(|a, b| {
         a.chain_id.cmp(&b.chain_id).then(a.res_num.cmp(&b.res_num))
@@ -87,7 +85,6 @@ pub fn validate_completeness(coords: &Coords) -> ValidationResult {
         let expected = expected_heavy_atoms(res_name_str);
         let expected_set: HashSet<&str> = expected.iter().copied().collect();
 
-        // Convert present atoms to strings for comparison
         let present: HashSet<String> = residue
             .atoms
             .iter()
@@ -99,14 +96,12 @@ pub fn validate_completeness(coords: &Coords) -> ValidationResult {
             })
             .collect();
 
-        // Find missing atoms
         let missing: Vec<String> = expected_set
             .iter()
             .filter(|&a| !present.contains(*a))
             .map(|s| s.to_string())
             .collect();
 
-        // Find extra atoms (not in expected list, excluding hydrogens)
         let extra: Vec<String> = present
             .iter()
             .filter(|a| {
@@ -147,14 +142,8 @@ pub fn completeness_report(coords: &Coords) -> String {
         "COORDS Completeness Report\n{}\n",
         "=".repeat(50)
     ));
-    report.push_str(&format!(
-        "Total residues: {}\n",
-        validation.total_residues
-    ));
-    report.push_str(&format!(
-        "Incomplete residues: {}\n",
-        validation.incomplete_residues
-    ));
+    report.push_str(&format!("Total residues: {}\n", validation.total_residues));
+    report.push_str(&format!("Incomplete residues: {}\n", validation.incomplete_residues));
     report.push_str(&format!(
         "Complete: {}\n\n",
         if validation.is_complete { "YES" } else { "NO" }
@@ -165,9 +154,7 @@ pub fn completeness_report(coords: &Coords) -> String {
         for (res_num, res_name, atoms) in &validation.missing_atoms {
             report.push_str(&format!(
                 "  Residue {} ({}): {}\n",
-                res_num,
-                res_name,
-                atoms.join(", ")
+                res_num, res_name, atoms.join(", ")
             ));
         }
         report.push('\n');
@@ -178,9 +165,7 @@ pub fn completeness_report(coords: &Coords) -> String {
         for (res_num, res_name, atoms) in &validation.extra_atoms {
             report.push_str(&format!(
                 "  Residue {} ({}): {}\n",
-                res_num,
-                res_name,
-                atoms.join(", ")
+                res_num, res_name, atoms.join(", ")
             ));
         }
     }
@@ -259,10 +244,10 @@ mod tests {
 
     #[test]
     fn test_expected_heavy_atoms() {
-        assert_eq!(expected_heavy_atoms("GLY").len(), 4); // No CB
-        assert_eq!(expected_heavy_atoms("ALA").len(), 5); // + CB
-        assert_eq!(expected_heavy_atoms("ASP").len(), 8); // Full sidechain
-        assert_eq!(expected_heavy_atoms("TRP").len(), 14); // Largest
+        assert_eq!(expected_heavy_atoms("GLY").len(), 4);
+        assert_eq!(expected_heavy_atoms("ALA").len(), 5);
+        assert_eq!(expected_heavy_atoms("ASP").len(), 8);
+        assert_eq!(expected_heavy_atoms("TRP").len(), 14);
     }
 
     #[test]

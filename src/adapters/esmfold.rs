@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[cfg(feature = "python")]
-use crate::coords::{serialize_coords, Coords, CoordsAtom};
+use crate::types::coords::{serialize as serialize_coords, Coords, CoordsAtom, Element};
 
 #[cfg(feature = "python")]
 use numpy::PyArrayMethods;
@@ -176,6 +176,11 @@ pub fn esmfold_atom14_to_coords_internal(
         return Err(ESMFoldError::ConversionError("No valid atoms found".to_string()));
     }
 
+    let elements = atom_names.iter().map(|n| {
+        let s = std::str::from_utf8(n).unwrap_or("");
+        Element::from_atom_name(s)
+    }).collect();
+
     let coords = Coords {
         num_atoms: atoms.len(),
         atoms,
@@ -183,6 +188,7 @@ pub fn esmfold_atom14_to_coords_internal(
         res_names,
         res_nums,
         atom_names,
+        elements,
     };
 
     serialize_coords(&coords).map_err(|e| ESMFoldError::ConversionError(e.to_string()))
@@ -326,6 +332,11 @@ pub fn esmfold_to_coords_internal(
         ));
     }
 
+    let elements = atom_names.iter().map(|n| {
+        let s = std::str::from_utf8(n).unwrap_or("");
+        Element::from_atom_name(s)
+    }).collect();
+
     let coords = Coords {
         num_atoms: atoms.len(),
         atoms,
@@ -333,6 +344,7 @@ pub fn esmfold_to_coords_internal(
         res_names,
         res_nums,
         atom_names,
+        elements,
     };
 
     serialize_coords(&coords).map_err(|e| ESMFoldError::ConversionError(e.to_string()))

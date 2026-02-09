@@ -2,12 +2,13 @@
 
 use pyo3::prelude::*;
 
-use super::{binary, pdb};
+use crate::types::coords::{deserialize, serialize};
+use crate::adapters::pdb;
 
 #[pyfunction]
 pub fn deserialize_coords_py(coords_bytes: Vec<u8>) -> PyResult<Vec<u8>> {
-    binary::deserialize(&coords_bytes)
-        .and_then(|coords| binary::serialize(&coords))
+    deserialize(&coords_bytes)
+        .and_then(|coords| serialize(&coords))
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
 
@@ -31,12 +32,11 @@ pub fn coords_to_pdb(coords_bytes: Vec<u8>) -> PyResult<String> {
 
 #[pyfunction]
 pub fn coords_to_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
-    let coords = binary::deserialize(&coords_bytes)
+    let coords = deserialize(&coords_bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
     let num_atoms = coords.num_atoms;
 
-    // Convert to Python lists
     let coords_list: Vec<Vec<f32>> = coords.atoms.iter().map(|a| vec![a.x, a.y, a.z]).collect();
     let chain_ids: Vec<String> = coords
         .chain_ids
@@ -55,7 +55,6 @@ pub fn coords_to_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<Py
         .map(|b| std::str::from_utf8(b).unwrap_or("X").trim().to_string())
         .collect();
 
-    // Return as dict
     let dict = pyo3::types::PyDict::new(py);
     dict.set_item("coord", coords_list)?;
     dict.set_item("chain_id", chain_ids)?;

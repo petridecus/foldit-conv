@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[cfg(feature = "python")]
-use crate::coords::{serialize_coords, Coords, CoordsAtom};
+use crate::types::coords::{serialize as serialize_coords, Coords, CoordsAtom, Element};
 
 #[cfg(feature = "python")]
 use numpy::{PyArrayMethods, PyUntypedArrayMethods};
@@ -353,6 +353,11 @@ fn boltz_structure_to_coords(
         ));
     }
 
+    let elements = atom_names.iter().map(|n| {
+        let s = std::str::from_utf8(n).unwrap_or("");
+        Element::from_atom_name(s)
+    }).collect();
+
     let coords = Coords {
         num_atoms: atoms.len(),
         atoms,
@@ -360,6 +365,7 @@ fn boltz_structure_to_coords(
         res_names,
         res_nums,
         atom_names,
+        elements,
     };
 
     serialize_coords(&coords).map_err(|e| SimpleFoldError::ConversionError(e.to_string()))
@@ -497,6 +503,11 @@ fn atom37_dict_to_coords(
         ));
     }
 
+    let elements = atom_names.iter().map(|n| {
+        let s = std::str::from_utf8(n).unwrap_or("");
+        Element::from_atom_name(s)
+    }).collect();
+
     let coords = Coords {
         num_atoms: atoms.len(),
         atoms,
@@ -504,6 +515,7 @@ fn atom37_dict_to_coords(
         res_names,
         res_nums,
         atom_names,
+        elements,
     };
 
     serialize_coords(&coords).map_err(|e| SimpleFoldError::ConversionError(e.to_string()))

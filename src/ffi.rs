@@ -74,7 +74,7 @@ pub extern "C" fn pdb_to_coords_bytes(pdb_ptr: *const c_char, pdb_len: usize) ->
             Ok(s) => s,
             Err(_) => return CoordsResult::error("Invalid UTF-8 in PDB string"),
         };
-        match crate::coords::pdb_to_coords_internal(pdb_str) {
+        match crate::adapters::pdb::pdb_to_coords(pdb_str) {
             Ok(coords_bytes) => CoordsResult::success(coords_bytes),
             Err(e) => CoordsResult::error(&e.to_string()),
         }
@@ -99,7 +99,7 @@ pub extern "C" fn coords_to_pdb(
     }
     unsafe {
         let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
-        match crate::coords::coords_bytes_to_pdb(coords_slice) {
+        match crate::adapters::pdb::coords_to_pdb(coords_slice) {
             Ok(pdb_string) => {
                 *out_len = pdb_string.len();
                 std::ffi::CString::new(pdb_string).unwrap().into_raw()
@@ -116,8 +116,8 @@ pub extern "C" fn coords_from_coords(coords_ptr: *const u8, coords_len: usize) -
     }
     unsafe {
         let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
-        match crate::coords::deserialize_coords_internal(coords_slice)
-            .and_then(|coords| crate::coords::serialize_coords(&coords))
+        match crate::types::coords::deserialize(coords_slice)
+            .and_then(|coords| crate::types::coords::serialize(&coords))
         {
             Ok(coords_bytes) => CoordsResult::success(coords_bytes),
             Err(e) => CoordsResult::error(&e.to_string()),

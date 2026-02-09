@@ -5,8 +5,7 @@
 //! - Atom filtering
 //! - Kabsch alignment
 
-use super::binary::{deserialize, serialize};
-use super::types::{Coords, CoordsError};
+use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, CoordsError, Element};
 use glam::{Mat3, Vec3};
 
 /// Extract backbone chains from COORDS data.
@@ -145,16 +144,6 @@ pub fn get_closest_backbone_atom(
 }
 
 /// Get the closest atom (backbone or sidechain) to a reference point for a residue.
-///
-/// # Arguments
-/// * `chains` - Backbone chains with (N, CA, C) triplets per residue
-/// * `sidechain_positions` - All sidechain atom positions
-/// * `sidechain_residue_indices` - Residue index for each sidechain atom
-/// * `residue_idx` - The residue to find the closest atom for (0-indexed)
-/// * `reference_point` - The point to measure distance from
-///
-/// Returns the position of the closest atom (backbone N/CA/C or any sidechain atom).
-/// Returns None if residue_idx is out of bounds.
 pub fn get_closest_atom_for_residue(
     chains: &[Vec<Vec3>],
     sidechain_positions: &[Vec3],
@@ -190,19 +179,6 @@ pub fn get_closest_atom_for_residue(
 }
 
 /// Find the closest atom to a reference point within a residue, returning both position and atom name.
-///
-/// This is similar to `get_closest_atom_for_residue` but also returns the atom name,
-/// which is useful for tracking atoms by identity during animation.
-///
-/// # Arguments
-/// * `chains` - Backbone chains with (N, CA, C) triplets per residue
-/// * `sidechain_positions` - All sidechain atom positions
-/// * `sidechain_residue_indices` - Residue index for each sidechain atom
-/// * `sidechain_atom_names` - Atom name for each sidechain atom
-/// * `residue_idx` - The residue to find the closest atom for (0-indexed)
-/// * `reference_point` - The point to measure distance from
-///
-/// Returns (position, atom_name) of the closest atom, or None if residue_idx is out of bounds.
 pub fn get_closest_atom_with_name(
     chains: &[Vec<Vec3>],
     sidechain_positions: &[Vec3],
@@ -264,6 +240,7 @@ pub fn filter_atoms(coords: &Coords, predicate: impl Fn(&[u8; 4]) -> bool) -> Co
     let mut res_names = Vec::new();
     let mut res_nums = Vec::new();
     let mut atom_names = Vec::new();
+    let mut elements = Vec::new();
 
     for i in 0..coords.num_atoms {
         if predicate(&coords.atom_names[i]) {
@@ -272,6 +249,7 @@ pub fn filter_atoms(coords: &Coords, predicate: impl Fn(&[u8; 4]) -> bool) -> Co
             res_names.push(coords.res_names[i]);
             res_nums.push(coords.res_nums[i]);
             atom_names.push(coords.atom_names[i]);
+            elements.push(coords.elements.get(i).copied().unwrap_or(Element::Unknown));
         }
     }
 
@@ -282,6 +260,7 @@ pub fn filter_atoms(coords: &Coords, predicate: impl Fn(&[u8; 4]) -> bool) -> Co
         res_names,
         res_nums,
         atom_names,
+        elements,
     }
 }
 
@@ -292,6 +271,7 @@ pub fn filter_residues(coords: &Coords, predicate: impl Fn(&[u8; 3]) -> bool) ->
     let mut res_names = Vec::new();
     let mut res_nums = Vec::new();
     let mut atom_names = Vec::new();
+    let mut elements = Vec::new();
 
     for i in 0..coords.num_atoms {
         if predicate(&coords.res_names[i]) {
@@ -300,6 +280,7 @@ pub fn filter_residues(coords: &Coords, predicate: impl Fn(&[u8; 3]) -> bool) ->
             res_names.push(coords.res_names[i]);
             res_nums.push(coords.res_nums[i]);
             atom_names.push(coords.atom_names[i]);
+            elements.push(coords.elements.get(i).copied().unwrap_or(Element::Unknown));
         }
     }
 
@@ -310,11 +291,12 @@ pub fn filter_residues(coords: &Coords, predicate: impl Fn(&[u8; 3]) -> bool) ->
         res_names,
         res_nums,
         atom_names,
+        elements,
     }
 }
 
 /// Standard amino acid residue names
-const PROTEIN_RESIDUES: &[&str] = &[
+pub const PROTEIN_RESIDUES: &[&str] = &[
     "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
     "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
     // Non-standard but protein-like
@@ -345,14 +327,12 @@ pub fn kabsch_alignment(reference: &[Vec3], target: &[Vec3]) -> Option<(Mat3, Ve
         return None;
     }
 
-    // 1. Center both point sets
     let ref_centroid = centroid(reference);
     let tgt_centroid = centroid(target);
 
     let ref_centered: Vec<Vec3> = reference.iter().map(|p| *p - ref_centroid).collect();
     let tgt_centered: Vec<Vec3> = target.iter().map(|p| *p - tgt_centroid).collect();
 
-    // 2. Compute covariance matrix H = sum(tgt * ref^T)
     let mut h = [[0.0f32; 3]; 3];
     for k in 0..reference.len() {
         let t = tgt_centered[k];
@@ -364,10 +344,8 @@ pub fn kabsch_alignment(reference: &[Vec3], target: &[Vec3]) -> Option<(Mat3, Ve
         }
     }
 
-    // 3. SVD: H = U * S * V^T
     let (u, _s, v) = svd_3x3(h);
 
-    // 4. Rotation R = V * U^T
     let u_mat = Mat3::from_cols(
         Vec3::new(u[0][0], u[1][0], u[2][0]),
         Vec3::new(u[0][1], u[1][1], u[2][1]),
@@ -381,20 +359,17 @@ pub fn kabsch_alignment(reference: &[Vec3], target: &[Vec3]) -> Option<(Mat3, Ve
 
     let mut rotation = v_mat * u_mat.transpose();
 
-    // Handle reflection (if det(R) < 0)
     if rotation.determinant() < 0.0 {
         let v_flipped = Mat3::from_cols(v_mat.col(0), v_mat.col(1), -v_mat.col(2));
         rotation = v_flipped * u_mat.transpose();
     }
 
-    // 5. Translation t = ref_centroid - R * tgt_centroid
     let translation = ref_centroid - rotation * tgt_centroid;
 
     Some((rotation, translation))
 }
 
 /// Kabsch-Umeyama algorithm: find optimal rotation, translation, AND scale.
-/// Returns (rotation_matrix, translation, scale) such that: aligned = rotation * (target * scale) + translation
 pub fn kabsch_alignment_with_scale(
     reference: &[Vec3],
     target: &[Vec3],
@@ -403,25 +378,21 @@ pub fn kabsch_alignment_with_scale(
         return None;
     }
 
-    // 1. Center both point sets
     let ref_centroid = centroid(reference);
     let tgt_centroid = centroid(target);
 
     let ref_centered: Vec<Vec3> = reference.iter().map(|p| *p - ref_centroid).collect();
     let tgt_centered: Vec<Vec3> = target.iter().map(|p| *p - tgt_centroid).collect();
 
-    // 2. Compute variances for scale estimation
     let _ref_var: f32 =
         ref_centered.iter().map(|p| p.length_squared()).sum::<f32>() / reference.len() as f32;
     let tgt_var: f32 =
         tgt_centered.iter().map(|p| p.length_squared()).sum::<f32>() / target.len() as f32;
 
-    // Avoid division by zero
     if tgt_var < 1e-10 {
         return None;
     }
 
-    // 3. Compute covariance matrix H = sum(tgt * ref^T)
     let mut h = [[0.0f32; 3]; 3];
     for k in 0..reference.len() {
         let t = tgt_centered[k];
@@ -433,10 +404,8 @@ pub fn kabsch_alignment_with_scale(
         }
     }
 
-    // 4. SVD: H = U * S * V^T
     let (u, s, v) = svd_3x3(h);
 
-    // 5. Rotation R = V * U^T
     let u_mat = Mat3::from_cols(
         Vec3::new(u[0][0], u[1][0], u[2][0]),
         Vec3::new(u[0][1], u[1][1], u[2][1]),
@@ -451,21 +420,16 @@ pub fn kabsch_alignment_with_scale(
     let mut rotation = v_mat * u_mat.transpose();
     let mut sign = 1.0f32;
 
-    // Handle reflection (if det(R) < 0)
     if rotation.determinant() < 0.0 {
         let v_flipped = Mat3::from_cols(v_mat.col(0), v_mat.col(1), -v_mat.col(2));
         rotation = v_flipped * u_mat.transpose();
         sign = -1.0;
     }
 
-    // 6. Compute optimal scale: c = trace(S * D) / var(target)
     let trace_sd = s[0] + s[1] + sign * s[2];
     let scale = trace_sd / (tgt_var * reference.len() as f32);
-
-    // Clamp scale to reasonable range (0.1x to 10x)
     let scale = scale.clamp(0.1, 10.0);
 
-    // 7. Translation t = ref_centroid - scale * R * tgt_centroid
     let translation = ref_centroid - scale * (rotation * tgt_centroid);
 
     Some((rotation, translation, scale))
@@ -499,7 +463,6 @@ pub fn transform_coords_with_scale(
 }
 
 /// Align COORDS to match reference CA positions using Kabsch algorithm.
-/// This transforms ALL atoms in the COORDS data.
 pub fn align_to_reference(
     coords: &mut Coords,
     reference_ca: &[Vec3],
@@ -536,9 +499,7 @@ pub fn align_coords_bytes(
 // SVD Implementation (Jacobi iteration for 3x3 matrices)
 // ============================================================================
 
-/// Compute SVD of a 3x3 matrix: A = U * diag(S) * V^T
 fn svd_3x3(a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3], [[f32; 3]; 3]) {
-    // Compute A^T * A
     let mut ata = [[0.0f32; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
@@ -548,17 +509,14 @@ fn svd_3x3(a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3], [[f32; 3]; 3]) {
         }
     }
 
-    // Find eigenvalues and eigenvectors of A^T * A using Jacobi iteration
     let (eigenvalues, v) = jacobi_eigendecomposition(ata);
 
-    // Singular values are sqrt of eigenvalues
     let s = [
         eigenvalues[0].max(0.0).sqrt(),
         eigenvalues[1].max(0.0).sqrt(),
         eigenvalues[2].max(0.0).sqrt(),
     ];
 
-    // Compute U = A * V * S^-1
     let mut u = [[0.0f32; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
@@ -572,13 +530,11 @@ fn svd_3x3(a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3], [[f32; 3]; 3]) {
         }
     }
 
-    // Orthonormalize U using Gram-Schmidt
     orthonormalize(&mut u);
 
     (u, s, v)
 }
 
-/// Jacobi eigendecomposition for symmetric 3x3 matrix
 fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) {
     let mut v = [[0.0f32; 3]; 3];
     for i in 0..3 {
@@ -587,7 +543,6 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
 
     const MAX_ITER: usize = 50;
     for _ in 0..MAX_ITER {
-        // Find largest off-diagonal element
         let mut max_val = 0.0f32;
         let mut p = 0;
         let mut q = 1;
@@ -605,7 +560,6 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
             break;
         }
 
-        // Compute rotation angle
         let diff = a[q][q] - a[p][p];
         let theta = if diff.abs() < 1e-10 {
             std::f32::consts::FRAC_PI_4
@@ -616,7 +570,6 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
         let c = theta.cos();
         let s = theta.sin();
 
-        // Apply rotation to A
         let mut new_a = a;
         new_a[p][p] = c * c * a[p][p] - 2.0 * s * c * a[p][q] + s * s * a[q][q];
         new_a[q][q] = s * s * a[p][p] + 2.0 * s * c * a[p][q] + c * c * a[q][q];
@@ -633,7 +586,6 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
         }
         a = new_a;
 
-        // Apply rotation to V
         for i in 0..3 {
             let vip = v[i][p];
             let viq = v[i][q];
@@ -642,10 +594,8 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
         }
     }
 
-    // Extract eigenvalues (diagonal of A)
     let eigenvalues = [a[0][0], a[1][1], a[2][2]];
 
-    // Sort by decreasing eigenvalue
     let mut indices = [0usize, 1, 2];
     indices.sort_by(|&i, &j| eigenvalues[j].partial_cmp(&eigenvalues[i]).unwrap());
 
@@ -665,9 +615,7 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
     (sorted_eigenvalues, sorted_v)
 }
 
-/// Gram-Schmidt orthonormalization for 3x3 matrix (columns as vectors)
 fn orthonormalize(m: &mut [[f32; 3]; 3]) {
-    // Normalize first column
     let mut norm = 0.0f32;
     for i in 0..3 {
         norm += m[i][0] * m[i][0];
@@ -679,7 +627,6 @@ fn orthonormalize(m: &mut [[f32; 3]; 3]) {
         }
     }
 
-    // Second column: subtract projection onto first, normalize
     let mut dot = 0.0f32;
     for i in 0..3 {
         dot += m[i][1] * m[i][0];
@@ -698,7 +645,6 @@ fn orthonormalize(m: &mut [[f32; 3]; 3]) {
         }
     }
 
-    // Third column: subtract projections onto first two, normalize
     dot = 0.0;
     for i in 0..3 {
         dot += m[i][2] * m[i][0];
@@ -726,11 +672,6 @@ fn orthonormalize(m: &mut [[f32; 3]; 3]) {
 }
 
 /// Linear interpolation between two Coords instances.
-/// Both must have the same number of atoms in the same order.
-/// Returns None if the two Coords have different atom counts.
-///
-/// This is the foundation for animation - interpolating all atom positions
-/// from a start state to an end state.
 pub fn interpolate_coords(start: &Coords, end: &Coords, t: f32) -> Option<Coords> {
     if start.num_atoms != end.num_atoms {
         return None;
@@ -743,7 +684,7 @@ pub fn interpolate_coords(start: &Coords, end: &Coords, t: f32) -> Option<Coords
         .atoms
         .iter()
         .zip(end.atoms.iter())
-        .map(|(s, e)| super::types::CoordsAtom {
+        .map(|(s, e)| CoordsAtom {
             x: s.x * one_minus_t + e.x * t,
             y: s.y * one_minus_t + e.y * t,
             z: s.z * one_minus_t + e.z * t,
@@ -755,21 +696,15 @@ pub fn interpolate_coords(start: &Coords, end: &Coords, t: f32) -> Option<Coords
     Some(Coords {
         num_atoms: start.num_atoms,
         atoms,
-        // Metadata stays the same (from start, though they should match)
         chain_ids: start.chain_ids.clone(),
         res_names: start.res_names.clone(),
         res_nums: start.res_nums.clone(),
         atom_names: start.atom_names.clone(),
+        elements: start.elements.clone(),
     })
 }
 
 /// Interpolate Coords with a collapse/expand effect through a collapse point.
-/// Used for mutation animations where atoms collapse toward the CA and then expand.
-///
-/// - For t in [0.0, 0.5]: positions collapse from `start` toward `collapse_point`
-/// - For t in [0.5, 1.0]: positions expand from `collapse_point` toward `end`
-///
-/// The `collapse_fn` takes a residue index and returns the collapse point (typically CA position).
 pub fn interpolate_coords_collapse<F>(
     start: &Coords,
     end: &Coords,
@@ -777,7 +712,7 @@ pub fn interpolate_coords_collapse<F>(
     collapse_fn: F,
 ) -> Option<Coords>
 where
-    F: Fn(i32, u8) -> Vec3, // (res_num, chain_id) -> collapse point
+    F: Fn(i32, u8) -> Vec3,
 {
     if start.num_atoms != end.num_atoms {
         return None;
@@ -796,16 +731,14 @@ where
             let collapse_point = collapse_fn(start.res_nums[i], start.chain_ids[i]);
 
             let interpolated = if t < 0.5 {
-                // Collapse phase: start -> collapse_point
                 let phase_t = t * 2.0;
                 start_pos.lerp(collapse_point, phase_t)
             } else {
-                // Expand phase: collapse_point -> end
                 let phase_t = (t - 0.5) * 2.0;
                 collapse_point.lerp(end_pos, phase_t)
             };
 
-            super::types::CoordsAtom {
+            CoordsAtom {
                 x: interpolated.x,
                 y: interpolated.y,
                 z: interpolated.z,
@@ -822,6 +755,7 @@ where
         res_names: start.res_names.clone(),
         res_nums: start.res_nums.clone(),
         atom_names: start.atom_names.clone(),
+        elements: start.elements.clone(),
     })
 }
 
@@ -891,45 +825,36 @@ mod tests {
         let start = Coords {
             num_atoms: 2,
             atoms: vec![
-                super::super::types::CoordsAtom {
-                    x: 0.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
-                },
-                super::super::types::CoordsAtom {
-                    x: 1.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
-                },
+                CoordsAtom { x: 0.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
+                CoordsAtom { x: 1.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
             ],
             chain_ids: vec![b'A', b'A'],
             res_names: vec![*b"ALA", *b"ALA"],
             res_nums: vec![1, 1],
             atom_names: vec![*b"N   ", *b"CA  "],
+            elements: vec![Element::Unknown; 2],
         };
 
         let end = Coords {
             num_atoms: 2,
             atoms: vec![
-                super::super::types::CoordsAtom {
-                    x: 0.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
-                },
-                super::super::types::CoordsAtom {
-                    x: 1.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0,
-                },
+                CoordsAtom { x: 0.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
+                CoordsAtom { x: 1.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
             ],
             chain_ids: vec![b'A', b'A'],
             res_names: vec![*b"ALA", *b"ALA"],
             res_nums: vec![1, 1],
             atom_names: vec![*b"N   ", *b"CA  "],
+            elements: vec![Element::Unknown; 2],
         };
 
-        // Test t=0.5
         let mid = interpolate_coords(&start, &end, 0.5).unwrap();
         assert!((mid.atoms[0].y - 5.0).abs() < 0.001);
         assert!((mid.atoms[1].y - 5.0).abs() < 0.001);
 
-        // Test t=0
         let at_start = interpolate_coords(&start, &end, 0.0).unwrap();
         assert!((at_start.atoms[0].y - 0.0).abs() < 0.001);
 
-        // Test t=1
         let at_end = interpolate_coords(&start, &end, 1.0).unwrap();
         assert!((at_end.atoms[0].y - 10.0).abs() < 0.001);
     }
@@ -956,7 +881,6 @@ mod tests {
             Vec3::new(0.0, 0.0, 1.0),
         ];
         let (rotation, translation) = kabsch_alignment(&points, &points).unwrap();
-        // Should be identity rotation and zero translation
         assert!((rotation.determinant() - 1.0).abs() < 0.01);
         assert!(translation.length() < 0.01);
     }
