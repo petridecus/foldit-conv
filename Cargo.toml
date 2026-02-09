@@ -21,6 +21,8 @@ ndarray = "0.15"
 pdbtbx = "0.12"
 thiserror = "1.0"
 glam = "0.30"
+rmp = "0.8"
+flate2 = "1"
 
 [features]
 default = []

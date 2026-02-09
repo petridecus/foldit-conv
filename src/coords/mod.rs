@@ -8,6 +8,7 @@
 //! - Validation: `validation::validate_completeness`, `validation::completeness_report`
 //! - Python bindings (feature-gated)
 
+pub mod bcif;
 pub mod binary;
 pub mod gpu;
 pub mod pdb;
@@ -28,6 +29,7 @@ pub use gpu::{
     to_atom_metadata as coords_to_atom_metadata, to_positions_f32 as coords_to_positions_f32,
     to_positions_flat as coords_to_positions_flat,
 };
+pub use bcif::{bcif_file_to_coords, bcif_to_coords};
 pub use pdb::{
     coords_to_pdb as coords_bytes_to_pdb, mmcif_file_to_coords, mmcif_str_to_coords,
     mmcif_to_coords as mmcif_to_coords_internal, pdb_str_to_coords,

@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod coords;
 pub mod ffi;
+pub mod secondary_structure;
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
