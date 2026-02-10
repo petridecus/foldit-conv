@@ -265,6 +265,7 @@ pub struct ValidationResult {
 
 pub const COORDS_MAGIC: &[u8; 8] = b"COORDS01";
 const COORDS_MAGIC_V0: &[u8; 8] = b"COORDS00";
+pub const ASSEMBLY_MAGIC: &[u8; 8] = b"ASSEM01\0";
 
 /// Deserialize COORDS binary format to Coords struct.
 /// Supports both COORDS00 (no element data) and COORDS01 (with element data).
@@ -427,4 +428,183 @@ pub fn atom_count(coords_bytes: &[u8]) -> Result<usize, CoordsError> {
     ) as usize;
 
     Ok(num_atoms)
+}
+
+// ============================================================================
+// ASSEM01 binary serialization (assembly format with entity metadata)
+// ============================================================================
+
+use super::entity::{MoleculeEntity, MoleculeType};
+
+/// Serialize a list of entities to ASSEM01 binary format.
+///
+/// Format:
+/// - 8 bytes: magic "ASSEM01\0"
+/// - 4 bytes: entity_count (u32 BE)
+/// - Per entity header (5 bytes each):
+///   - 1 byte: molecule_type wire byte
+///   - 4 bytes: atom_count (u32 BE)
+/// - Per atom (26 bytes, same as COORDS01):
+///   - 12 bytes: x,y,z (f32 BE)
+///   - 1 byte: chain_id
+///   - 3 bytes: res_name
+///   - 4 bytes: res_num (i32 BE)
+///   - 4 bytes: atom_name
+///   - 2 bytes: element symbol
+pub fn serialize_assembly(entities: &[MoleculeEntity]) -> Result<Vec<u8>, CoordsError> {
+    let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+    let header_size = 8 + 4 + entities.len() * 5;
+    let atom_size = total_atoms * 26;
+    let mut buffer = Vec::with_capacity(header_size + atom_size);
+
+    // Magic
+    buffer.extend_from_slice(ASSEMBLY_MAGIC);
+
+    // Entity count
+    buffer.extend_from_slice(&(entities.len() as u32).to_be_bytes());
+
+    // Per-entity headers
+    for entity in entities {
+        buffer.push(entity.molecule_type.to_wire_byte());
+        buffer.extend_from_slice(&(entity.coords.num_atoms as u32).to_be_bytes());
+    }
+
+    // Atom data (same layout as COORDS01)
+    for entity in entities {
+        let c = &entity.coords;
+        for i in 0..c.num_atoms {
+            let atom = &c.atoms[i];
+            buffer.extend_from_slice(&atom.x.to_be_bytes());
+            buffer.extend_from_slice(&atom.y.to_be_bytes());
+            buffer.extend_from_slice(&atom.z.to_be_bytes());
+            buffer.push(c.chain_ids[i]);
+            buffer.extend_from_slice(&c.res_names[i]);
+            buffer.extend_from_slice(&c.res_nums[i].to_be_bytes());
+            buffer.extend_from_slice(&c.atom_names[i]);
+            let sym = c.elements.get(i).map_or("X", |e| e.symbol());
+            let sym_bytes = sym.as_bytes();
+            buffer.push(sym_bytes.first().copied().unwrap_or(b'X'));
+            buffer.push(sym_bytes.get(1).copied().unwrap_or(0));
+        }
+    }
+
+    Ok(buffer)
+}
+
+/// Deserialize ASSEM01 binary format back to a list of entities.
+pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    if bytes.len() < 12 {
+        return Err(CoordsError::InvalidFormat(
+            "Data too short for ASSEM01 header".to_string(),
+        ));
+    }
+
+    let magic = &bytes[0..8];
+    if magic != ASSEMBLY_MAGIC {
+        return Err(CoordsError::InvalidFormat(
+            "Invalid magic number for ASSEM01".to_string(),
+        ));
+    }
+
+    let entity_count = u32::from_be_bytes(
+        bytes[8..12].try_into()
+            .map_err(|_| CoordsError::InvalidFormat("Invalid entity count".to_string()))?,
+    ) as usize;
+
+    let headers_end = 12 + entity_count * 5;
+    if bytes.len() < headers_end {
+        return Err(CoordsError::InvalidFormat(
+            "Data too short for entity headers".to_string(),
+        ));
+    }
+
+    // Parse entity headers
+    let mut entity_headers: Vec<(MoleculeType, usize)> = Vec::with_capacity(entity_count);
+    let mut offset = 12;
+    for _ in 0..entity_count {
+        let mol_type = MoleculeType::from_wire_byte(bytes[offset])
+            .ok_or_else(|| CoordsError::InvalidFormat(
+                format!("Unknown molecule type byte: {}", bytes[offset]),
+            ))?;
+        offset += 1;
+        let atom_count = u32::from_be_bytes(
+            bytes[offset..offset + 4].try_into()
+                .map_err(|_| CoordsError::InvalidFormat("Invalid atom count in entity header".to_string()))?,
+        ) as usize;
+        offset += 4;
+        entity_headers.push((mol_type, atom_count));
+    }
+
+    let total_atoms: usize = entity_headers.iter().map(|(_, c)| c).sum();
+    if bytes.len() < headers_end + total_atoms * 26 {
+        return Err(CoordsError::InvalidFormat(
+            "Data too short for atom data".to_string(),
+        ));
+    }
+
+    // Parse atom data per entity
+    let mut cursor = &bytes[headers_end..];
+    let mut entities = Vec::with_capacity(entity_count);
+
+    for (entity_id, (mol_type, atom_count)) in entity_headers.into_iter().enumerate() {
+        let mut atoms = Vec::with_capacity(atom_count);
+        let mut chain_ids = Vec::with_capacity(atom_count);
+        let mut res_names = Vec::with_capacity(atom_count);
+        let mut res_nums = Vec::with_capacity(atom_count);
+        let mut atom_names = Vec::with_capacity(atom_count);
+        let mut elements = Vec::with_capacity(atom_count);
+
+        for _ in 0..atom_count {
+            let x = f32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid x coordinate".to_string())
+            })?);
+            let y = f32::from_be_bytes(cursor[4..8].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid y coordinate".to_string())
+            })?);
+            let z = f32::from_be_bytes(cursor[8..12].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid z coordinate".to_string())
+            })?);
+            atoms.push(CoordsAtom { x, y, z, occupancy: 1.0, b_factor: 0.0 });
+            cursor = &cursor[12..];
+
+            chain_ids.push(cursor[0]);
+            cursor = &cursor[1..];
+
+            let mut rn = [0u8; 3];
+            rn.copy_from_slice(&cursor[0..3]);
+            res_names.push(rn);
+            cursor = &cursor[3..];
+
+            let res_num = i32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid residue number".to_string())
+            })?);
+            res_nums.push(res_num);
+            cursor = &cursor[4..];
+
+            let mut an = [0u8; 4];
+            an.copy_from_slice(&cursor[0..4]);
+            atom_names.push(an);
+            cursor = &cursor[4..];
+
+            let sym_str = std::str::from_utf8(&cursor[0..2]).unwrap_or("").trim_matches('\0').trim();
+            elements.push(Element::from_symbol(sym_str));
+            cursor = &cursor[2..];
+        }
+
+        entities.push(MoleculeEntity {
+            entity_id: entity_id as u32,
+            molecule_type: mol_type,
+            coords: Coords {
+                num_atoms: atom_count,
+                atoms,
+                chain_ids,
+                res_names,
+                res_nums,
+                atom_names,
+                elements,
+            },
+        });
+    }
+
+    Ok(entities)
 }

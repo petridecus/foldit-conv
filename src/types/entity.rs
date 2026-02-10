@@ -22,6 +22,33 @@ pub enum MoleculeType {
     Water,
 }
 
+impl MoleculeType {
+    /// Convert to a wire byte for ASSEM01 binary format.
+    pub fn to_wire_byte(self) -> u8 {
+        match self {
+            MoleculeType::Protein => 0,
+            MoleculeType::DNA => 1,
+            MoleculeType::RNA => 2,
+            MoleculeType::Ligand => 3,
+            MoleculeType::Ion => 4,
+            MoleculeType::Water => 5,
+        }
+    }
+
+    /// Parse from a wire byte in ASSEM01 binary format.
+    pub fn from_wire_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(MoleculeType::Protein),
+            1 => Some(MoleculeType::DNA),
+            2 => Some(MoleculeType::RNA),
+            3 => Some(MoleculeType::Ligand),
+            4 => Some(MoleculeType::Ion),
+            5 => Some(MoleculeType::Water),
+            _ => None,
+        }
+    }
+}
+
 /// A single entity: one logical molecule (a protein chain, a ligand, waters, etc.)
 /// with its own coordinate set.
 #[derive(Debug, Clone)]

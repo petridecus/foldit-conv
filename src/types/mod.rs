@@ -10,9 +10,13 @@ pub use coords::{
     ResidueAtoms, ValidationResult,
     // Binary serialization
     deserialize, serialize, atom_count, COORDS_MAGIC,
+    ASSEMBLY_MAGIC, serialize_assembly, deserialize_assembly,
 };
 pub use entity::{
     classify_residue, extract_by_type, merge_entities, split_into_entities,
     MoleculeEntity, MoleculeType,
 };
-pub use assembly::{Assembly, CombinedSession, prepare_combined_session, split_combined_result};
+pub use assembly::{
+    Assembly, CombinedSession, prepare_combined_session, split_combined_result,
+    CombinedAssembly, prepare_combined_assembly,
+};
