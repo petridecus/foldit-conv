@@ -9,7 +9,7 @@
 
 use crate::ops::transform::PROTEIN_RESIDUES;
 use super::coords::{Coords, Element};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Classification of molecule types found in structural biology files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,6 +20,9 @@ pub enum MoleculeType {
     Ligand,
     Ion,
     Water,
+    Lipid,
+    Cofactor,
+    Solvent,
 }
 
 impl MoleculeType {
@@ -32,6 +35,9 @@ impl MoleculeType {
             MoleculeType::Ligand => 3,
             MoleculeType::Ion => 4,
             MoleculeType::Water => 5,
+            MoleculeType::Lipid => 6,
+            MoleculeType::Cofactor => 7,
+            MoleculeType::Solvent => 8,
         }
     }
 
@@ -44,6 +50,9 @@ impl MoleculeType {
             3 => Some(MoleculeType::Ligand),
             4 => Some(MoleculeType::Ion),
             5 => Some(MoleculeType::Water),
+            6 => Some(MoleculeType::Lipid),
+            7 => Some(MoleculeType::Cofactor),
+            8 => Some(MoleculeType::Solvent),
             _ => None,
         }
     }
@@ -56,6 +65,37 @@ pub struct MoleculeEntity {
     pub entity_id: u32,
     pub molecule_type: MoleculeType,
     pub coords: Coords,
+}
+
+/// Pre-extracted ring geometry for a single nucleotide base.
+#[derive(Debug, Clone)]
+pub struct NucleotideRing {
+    /// Hexagonal ring atom positions in order: N1, C2, N3, C4, C5, C6
+    pub hex_ring: Vec<glam::Vec3>,
+    /// Pentagonal ring for purines: C4, C5, N7, C8, N9 (empty for pyrimidines)
+    pub pent_ring: Vec<glam::Vec3>,
+    /// NDB color for this base
+    pub color: [f32; 3],
+    /// C1' sugar carbon position (for anchoring stem to backbone spline).
+    pub c1_prime: Option<glam::Vec3>,
+}
+
+const HEX_RING_ATOMS: &[&str] = &["N1", "C2", "N3", "C4", "C5", "C6"];
+const PENT_RING_ATOMS: &[&str] = &["C4", "C5", "N7", "C8", "N9"];
+
+fn ndb_base_color(res_name: &str) -> Option<[f32; 3]> {
+    match res_name {
+        "DA" | "A" | "ADE" | "RAD" => Some([0.85, 0.20, 0.20]),
+        "DG" | "G" | "GUA" | "RGU" => Some([0.20, 0.80, 0.20]),
+        "DC" | "C" | "CYT" | "RCY" => Some([0.90, 0.90, 0.20]),
+        "DT" | "THY" => Some([0.20, 0.20, 0.85]),
+        "DU" | "U" | "URA" => Some([0.20, 0.85, 0.85]),
+        _ => None,
+    }
+}
+
+fn is_purine(res_name: &str) -> bool {
+    matches!(res_name, "DA" | "DG" | "DI" | "A" | "G" | "ADE" | "GUA" | "I" | "RAD" | "RGU")
 }
 
 impl MoleculeEntity {
@@ -103,17 +143,168 @@ impl MoleculeEntity {
                 }
             }
             MoleculeType::Water => format!("Water ({} molecules)", self.residue_count()),
+            MoleculeType::Lipid => format!("Lipid ({} molecules)", self.residue_count()),
+            MoleculeType::Cofactor => {
+                if let Some(rn) = self.coords.res_names.first() {
+                    let name = std::str::from_utf8(rn).unwrap_or("???").trim();
+                    let display = cofactor_display_name(name);
+                    let count = self.residue_count();
+                    if count > 1 {
+                        format!("{} ({} molecules)", display, count)
+                    } else {
+                        display.to_string()
+                    }
+                } else {
+                    "Cofactor".to_string()
+                }
+            }
+            MoleculeType::Solvent => format!("Solvent ({} molecules)", self.residue_count()),
         }
     }
 
     /// Whether this entity type participates in tab-cycling focus.
-    /// Protein: no (focused at group level). Water: no (ambient).
-    /// Ligand, Ion, DNA, RNA: yes.
+    /// Protein: no (focused at group level). Water, Ion: no (ambient).
+    /// Ligand, DNA, RNA: yes.
     pub fn is_focusable(&self) -> bool {
         matches!(
             self.molecule_type,
-            MoleculeType::Ligand | MoleculeType::Ion | MoleculeType::DNA | MoleculeType::RNA
+            MoleculeType::Ligand | MoleculeType::DNA | MoleculeType::RNA | MoleculeType::Cofactor
         )
+    }
+
+    /// Extract phosphorus (P) atom positions grouped by chain ID.
+    /// Returns one chain per polymer chain, each containing the P-atom positions in order.
+    /// Chains are split at gaps where consecutive P-P distance exceeds ~8 Å
+    /// (typical P-P distance is ~5.8–6.5 Å).
+    /// Only meaningful for DNA/RNA entities; returns empty for other molecule types.
+    pub fn extract_p_atom_chains(&self) -> Vec<Vec<glam::Vec3>> {
+        const MAX_PP_DIST_SQ: f32 = 8.0 * 8.0;
+
+        if !matches!(self.molecule_type, MoleculeType::DNA | MoleculeType::RNA) {
+            return Vec::new();
+        }
+
+        let mut raw_chains: BTreeMap<u8, Vec<glam::Vec3>> = BTreeMap::new();
+
+        for i in 0..self.coords.num_atoms {
+            let name = std::str::from_utf8(&self.coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+            if name == "P" {
+                let a = &self.coords.atoms[i];
+                raw_chains
+                    .entry(self.coords.chain_ids[i])
+                    .or_default()
+                    .push(glam::Vec3::new(a.x, a.y, a.z));
+            }
+        }
+
+        // Split chains at large gaps (missing residues / chain breaks)
+        let mut result = Vec::new();
+        for chain in raw_chains.into_values() {
+            let mut segment = Vec::new();
+            for pos in chain {
+                if let Some(&prev) = segment.last() {
+                    if pos.distance_squared(prev) > MAX_PP_DIST_SQ {
+                        if segment.len() >= 2 {
+                            result.push(std::mem::take(&mut segment));
+                        } else {
+                            segment.clear();
+                        }
+                    }
+                }
+                segment.push(pos);
+            }
+            if segment.len() >= 2 {
+                result.push(segment);
+            }
+        }
+
+        result
+    }
+
+    /// Extract base ring geometry for each nucleotide residue.
+    /// Returns one `NucleotideRing` per residue that has the required atoms.
+    /// Only meaningful for DNA/RNA entities; returns empty for other molecule types.
+    pub fn extract_base_rings(&self) -> Vec<NucleotideRing> {
+        if !matches!(self.molecule_type, MoleculeType::DNA | MoleculeType::RNA) {
+            return Vec::new();
+        }
+
+        // Group atom indices by (chain_id, res_num)
+        let mut residue_atoms: BTreeMap<(u8, i32), Vec<usize>> = BTreeMap::new();
+        for i in 0..self.coords.num_atoms {
+            let key = (self.coords.chain_ids[i], self.coords.res_nums[i]);
+            residue_atoms.entry(key).or_default().push(i);
+        }
+
+        let mut rings = Vec::new();
+        let mut skipped_partial = 0u32;
+        for indices in residue_atoms.values() {
+            // Get residue name from first atom
+            let res_name = std::str::from_utf8(&self.coords.res_names[indices[0]])
+                .unwrap_or("")
+                .trim();
+
+            let color = match ndb_base_color(res_name) {
+                Some(c) => c,
+                None => continue,
+            };
+
+            // Build atom_name -> position map for this residue.
+            // Use owned Strings with robust trimming (whitespace + null bytes)
+            // to handle varying parser conventions.
+            let mut atom_map: HashMap<String, glam::Vec3> = HashMap::new();
+            for &idx in indices {
+                let name = std::str::from_utf8(&self.coords.atom_names[idx])
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('\0')
+                    .to_owned();
+                let a = &self.coords.atoms[idx];
+                atom_map.insert(name, glam::Vec3::new(a.x, a.y, a.z));
+            }
+
+            // Collect hex ring positions
+            let hex_ring: Vec<glam::Vec3> = HEX_RING_ATOMS
+                .iter()
+                .filter_map(|name| atom_map.get(*name).copied())
+                .collect();
+            if hex_ring.len() != 6 {
+                skipped_partial += 1;
+                continue;
+            }
+
+            // Collect pent ring for purines
+            let pent_ring = if is_purine(res_name) {
+                let pent: Vec<glam::Vec3> = PENT_RING_ATOMS
+                    .iter()
+                    .filter_map(|name| atom_map.get(*name).copied())
+                    .collect();
+                if pent.len() == 5 { pent } else { Vec::new() }
+            } else {
+                Vec::new()
+            };
+
+            let c1_prime = atom_map.get("C1'").or_else(|| atom_map.get("C1*")).copied();
+
+            rings.push(NucleotideRing {
+                hex_ring,
+                pent_ring,
+                color,
+                c1_prime,
+            });
+        }
+
+        #[cfg(debug_assertions)]
+        if skipped_partial > 0 {
+            eprintln!(
+                "[base_rings] {} rings extracted, {} residues skipped (missing ring atoms)",
+                rings.len(), skipped_partial
+            );
+        }
+
+        rings
     }
 
     /// Number of residues (for protein/nucleic) or molecules (for small mol/ion/water).
@@ -130,22 +321,118 @@ impl MoleculeEntity {
     }
 }
 
-/// Standard DNA residue names (mmCIF convention).
-const DNA_RESIDUES: &[&str] = &["DA", "DC", "DG", "DT", "DU", "DI"];
+/// Standard DNA residue names (mmCIF convention + Rosetta internal name THY).
+const DNA_RESIDUES: &[&str] = &["DA", "DC", "DG", "DT", "DU", "DI", "THY"];
 
 /// Standard RNA residue names.
 /// Single-letter names (A, C, G, U) are the mmCIF standard for RNA.
-/// Three-letter variants are legacy PDB conventions.
-const RNA_RESIDUES: &[&str] = &["A", "C", "G", "U", "ADE", "CYT", "GUA", "URA", "I"];
+/// Three-letter variants (ADE, CYT, GUA, URA) are legacy PDB conventions
+/// and also used by Rosetta for DNA exports (acceptable: both use NA renderer).
+/// RAD/RCY/RGU are Rosetta internal names for RNA returned by the C++ backend.
+const RNA_RESIDUES: &[&str] = &["A", "C", "G", "U", "ADE", "CYT", "GUA", "URA", "I", "RAD", "RCY", "RGU"];
 
 /// Water residue names.
-const WATER_RESIDUES: &[&str] = &["HOH", "WAT", "H2O", "DOD"];
+const WATER_RESIDUES: &[&str] = &[
+    "HOH", "WAT", "H2O", "DOD",
+    // MD simulation water models (GROMACS, AMBER, CHARMM, etc.)
+    "SOL", "TIP", "TP3", "TIP3", "T3P", "SPC", "TP4", "TIP4", "T4P", "TP5", "TIP5",
+];
 
 /// Known ion residue names. These are single-atom residues with well-known names.
 const ION_RESIDUES: &[&str] = &[
     "ZN", "MG", "NA", "CL", "FE", "MN", "CO", "NI", "CU", "K", "CA", "BR", "I", "F", "LI",
     "CD", "SR", "BA", "CS", "RB", "PB", "HG", "PT", "AU", "AG",
 ];
+
+/// Known lipid residue 3-char truncated names.
+/// Covers common lipids from CHARMM, AMBER, and GROMACS force fields.
+/// Names are truncated to 3 characters to match PDB residue name conventions.
+const LIPID_RESIDUES: &[&str] = &[
+    // Phosphatidylcholines (DPPC, POPC, DOPC, DMPC, DSPC, DLPC)
+    "DPP", "POP", "DOP", "DMP", "DSP", "DLP",
+    // Phosphatidylethanolamines (DPPE, POPE, DOPE)
+    "PPE", "DPE",
+    // Phosphatidylglycerols (DPPG, POPG, DOPG)
+    "PPG", "DPG",
+    // Phosphatidylserines (DPPS, POPS, DOPS)
+    "PPS", "DPS",
+    // Cholesterol variants
+    "CHO", "CHL",
+    // Sphingomyelin, ceramide
+    "SPH", "CER",
+    // CHARMM-GUI lipid residue names (full 3-letter)
+    "PAL", "OLE", "STE", "MYR", "LAU",
+    // PDB crystallographic lipid codes (thylakoid/membrane lipids)
+    "LHG", // dipalmitoyl phosphatidylglycerol
+    "LMG", // monogalactosyl diglyceride (MGDG)
+    "DGD", // digalactosyl diacyl glycerol (DGDG)
+    "SQD", // sulfoquinovosyl diacylglycerol (SQDG)
+    // PDB detergent codes (amphipathic, treated as lipid-like)
+    "LMT", // dodecyl-beta-D-maltoside
+    "HTG", // heptyl 1-thiohexopyranoside
+];
+
+/// Known cofactor residue names (exact match, checked before lipid truncation).
+/// Covers porphyrins, quinones, nucleotide cofactors, and iron-sulfur clusters.
+const COFACTOR_RESIDUES: &[&str] = &[
+    // Porphyrins / chlorins
+    "HEM", "HEC", "HEA", "HEB", "CLA", "CHL", "PHO", "BCR", "BCB",
+    // Quinones
+    "PL9", "PLQ", "UQ1", "UQ2", "MQ7",
+    // Nucleotide cofactors
+    "NAD", "NAP", "NAI", "NDP", "FAD", "FMN",
+    "ATP", "ADP", "AMP", "ANP", "GTP", "GDP", "GMP", "GNP",
+    // Other
+    "SAM", "SAH", "COA", "ACO", "PLP", "PMP", "TPP", "TDP", "BTN", "BIO", "H4B", "BH4",
+    // Fe-S clusters
+    "SF4", "FES", "F3S",
+];
+
+/// Known solvent / crystallization artifact residue names (exact match).
+const SOLVENT_RESIDUES: &[&str] = &[
+    // Polyols / PEGs
+    "GOL", "EDO", "PEG", "1PE", "P6G", "PG4", "PGE",
+    // Salts / buffers
+    "SO4", "SUL", "PO4", "ACT", "ACE", "CIT", "FMT",
+    // Buffers
+    "TRS", "MES", "EPE", "IMD",
+    // Cryoprotectants
+    "MPD", "DMS", "BME", "IPA", "EOH",
+];
+
+/// Human-readable display name for a cofactor residue code.
+fn cofactor_display_name(res_name: &str) -> &str {
+    match res_name {
+        "CLA" => "Chlorophyll A",
+        "CHL" => "Chlorophyll B",
+        "BCR" => "Beta-Carotene",
+        "BCB" => "Beta-Carotene B",
+        "HEM" => "Heme",
+        "HEC" => "Heme C",
+        "HEA" => "Heme A",
+        "HEB" => "Heme B",
+        "PHO" => "Pheophytin",
+        "PL9" => "Plastoquinone",
+        "PLQ" => "Plastoquinone",
+        "UQ1" | "UQ2" => "Ubiquinone",
+        "MQ7" => "Menaquinone",
+        "NAD" | "NAP" | "NAI" | "NDP" => "NAD",
+        "FAD" => "FAD",
+        "FMN" => "FMN",
+        "ATP" | "ADP" | "AMP" | "ANP" => res_name,
+        "GTP" | "GDP" | "GMP" | "GNP" => res_name,
+        "SAM" | "SAH" => "SAM/SAH",
+        "COA" | "ACO" => "Coenzyme A",
+        "PLP" | "PMP" => "PLP",
+        "TPP" | "TDP" => "Thiamine PP",
+        "BTN" | "BIO" => "Biotin",
+        "H4B" | "BH4" => "Tetrahydrobiopterin",
+        "SF4" => "[4Fe-4S] Cluster",
+        "FES" => "[2Fe-2S] Cluster",
+        "F3S" => "[3Fe-4S] Cluster",
+        _ => res_name,
+    }
+}
 
 /// Classify a residue name into a `MoleculeType`.
 ///
@@ -168,17 +455,36 @@ pub fn classify_residue(name: &str) -> MoleculeType {
     if ION_RESIDUES.contains(&name) {
         return MoleculeType::Ion;
     }
+    // Cofactor: exact match, checked before lipid truncation
+    if COFACTOR_RESIDUES.contains(&name) {
+        return MoleculeType::Cofactor;
+    }
+    // Solvent / crystallization artifacts: exact match
+    if SOLVENT_RESIDUES.contains(&name) {
+        return MoleculeType::Solvent;
+    }
+    // Check lipid residues: exact match on truncated 3-char names
+    let truncated = if name.len() > 3 { &name[..3] } else { name };
+    if LIPID_RESIDUES.contains(&truncated) {
+        return MoleculeType::Lipid;
+    }
     MoleculeType::Ligand
 }
 
 /// Key for grouping atoms into entities.
-/// We use chain_id + molecule_type, except Water which is consolidated.
+/// We use chain_id + molecule_type, except Water/Solvent which are consolidated.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EntityKey {
     /// A polymeric chain (protein, DNA, RNA) on a specific chain.
     Chain(u8, MoleculeTypeOrd),
     /// All water molecules consolidated into one entity.
     Water,
+    /// All lipid molecules consolidated into one entity.
+    Lipid,
+    /// All solvent molecules consolidated into one entity.
+    Solvent,
+    /// Cofactors grouped by residue name (e.g. all CLA → one entity).
+    Cofactor([u8; 3]),
     /// A non-polymer residue (ligand, ion) keyed by chain + residue number.
     NonPolymer(u8, i32, MoleculeTypeOrd),
 }
@@ -220,6 +526,9 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
 
         let key = match mol_type {
             MoleculeType::Water => EntityKey::Water,
+            MoleculeType::Lipid => EntityKey::Lipid,
+            MoleculeType::Solvent => EntityKey::Solvent,
+            MoleculeType::Cofactor => EntityKey::Cofactor(coords.res_names[i]),
             MoleculeType::Protein | MoleculeType::DNA | MoleculeType::RNA => {
                 EntityKey::Chain(chain_id, MoleculeTypeOrd(mol_type))
             }
@@ -240,6 +549,9 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
             let mol_type = match &key {
                 EntityKey::Chain(_, mt) | EntityKey::NonPolymer(_, _, mt) => mt.0,
                 EntityKey::Water => MoleculeType::Water,
+                EntityKey::Lipid => MoleculeType::Lipid,
+                EntityKey::Solvent => MoleculeType::Solvent,
+                EntityKey::Cofactor(_) => MoleculeType::Cofactor,
             };
 
             let mut atoms = Vec::with_capacity(indices.len());
@@ -400,8 +712,11 @@ mod tests {
         assert_eq!(classify_residue("WAT"), MoleculeType::Water);
         assert_eq!(classify_residue("ZN"), MoleculeType::Ion);
         assert_eq!(classify_residue("MG"), MoleculeType::Ion);
-        assert_eq!(classify_residue("ATP"), MoleculeType::Ligand);
-        assert_eq!(classify_residue("HEM"), MoleculeType::Ligand);
+        // ATP and HEM are now cofactors, not ligands
+        assert_eq!(classify_residue("ATP"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("HEM"), MoleculeType::Cofactor);
+        // Unknown small molecules remain ligands
+        assert_eq!(classify_residue("UNL"), MoleculeType::Ligand);
     }
 
     #[test]
@@ -447,6 +762,7 @@ mod tests {
         };
 
         let entities = split_into_entities(&coords);
+        // Protein(A), Water, Cofactor(ATP) = 3 entities
         assert_eq!(entities.len(), 3);
 
         let protein = entities.iter().find(|e| e.molecule_type == MoleculeType::Protein).unwrap();
@@ -455,8 +771,9 @@ mod tests {
         let water = entities.iter().find(|e| e.molecule_type == MoleculeType::Water).unwrap();
         assert_eq!(water.coords.num_atoms, 2);
 
-        let ligand = entities.iter().find(|e| e.molecule_type == MoleculeType::Ligand).unwrap();
-        assert_eq!(ligand.coords.num_atoms, 1);
+        // ATP is now classified as Cofactor
+        let cofactor = entities.iter().find(|e| e.molecule_type == MoleculeType::Cofactor).unwrap();
+        assert_eq!(cofactor.coords.num_atoms, 1);
     }
 
     #[test]
@@ -502,5 +819,71 @@ mod tests {
 
         let dna = extract_by_type(&entities, MoleculeType::DNA);
         assert!(dna.is_none());
+    }
+
+    #[test]
+    fn test_classify_cofactor() {
+        assert_eq!(classify_residue("CLA"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("HEM"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("FAD"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("NAD"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("SF4"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("BCR"), MoleculeType::Cofactor);
+        assert_eq!(classify_residue("PL9"), MoleculeType::Cofactor);
+    }
+
+    #[test]
+    fn test_classify_solvent() {
+        assert_eq!(classify_residue("GOL"), MoleculeType::Solvent);
+        assert_eq!(classify_residue("EDO"), MoleculeType::Solvent);
+        assert_eq!(classify_residue("SO4"), MoleculeType::Solvent);
+        assert_eq!(classify_residue("PEG"), MoleculeType::Solvent);
+        assert_eq!(classify_residue("MPD"), MoleculeType::Solvent);
+        assert_eq!(classify_residue("DMS"), MoleculeType::Solvent);
+    }
+
+    #[test]
+    fn test_split_cofactor_grouping() {
+        // Two CLA residues on different chains should become one Cofactor entity
+        let coords = Coords {
+            num_atoms: 4,
+            atoms: (0..4).map(|i| make_atom(i as f32)).collect(),
+            chain_ids: vec![b'A', b'A', b'D', b'D'],
+            res_names: vec![
+                res_name("CLA"), res_name("CLA"),
+                res_name("CLA"), res_name("CLA"),
+            ],
+            res_nums: vec![1, 1, 2, 2],
+            atom_names: vec![
+                atom_name("MG"), atom_name("NA"),
+                atom_name("MG"), atom_name("NA"),
+            ],
+            elements: vec![Element::Unknown; 4],
+        };
+
+        let entities = split_into_entities(&coords);
+        // All CLA atoms go to one Cofactor entity (grouped by res_name)
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].molecule_type, MoleculeType::Cofactor);
+        assert_eq!(entities[0].coords.num_atoms, 4);
+    }
+
+    #[test]
+    fn test_split_solvent_consolidated() {
+        // GOL and SO4 are both Solvent, should be consolidated into one entity
+        let coords = Coords {
+            num_atoms: 3,
+            atoms: (0..3).map(|i| make_atom(i as f32)).collect(),
+            chain_ids: vec![b'A', b'B', b'C'],
+            res_names: vec![res_name("GOL"), res_name("SO4"), res_name("GOL")],
+            res_nums: vec![1, 2, 3],
+            atom_names: vec![atom_name("O1"), atom_name("S"), atom_name("O1")],
+            elements: vec![Element::Unknown; 3],
+        };
+
+        let entities = split_into_entities(&coords);
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].molecule_type, MoleculeType::Solvent);
+        assert_eq!(entities[0].coords.num_atoms, 3);
     }
 }

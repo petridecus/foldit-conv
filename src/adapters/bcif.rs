@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
-use crate::types::coords::{Coords, CoordsAtom, CoordsError, Element};
+use crate::types::coords::{ChainIdMapper, Coords, CoordsAtom, CoordsError, Element};
 
 /// Load a BinaryCIF file and convert to Coords.
 pub fn bcif_file_to_coords(path: &Path) -> Result<Coords, CoordsError> {
@@ -560,6 +560,7 @@ fn parse_bcif_to_coords(root: &MsgVal) -> Result<Coords, CoordsError> {
     let mut res_nums = Vec::with_capacity(row_count);
     let mut atom_names = Vec::with_capacity(row_count);
     let mut elements = Vec::with_capacity(row_count);
+    let mut chain_mapper = ChainIdMapper::new();
 
     for i in 0..row_count {
         atoms.push(CoordsAtom {
@@ -570,7 +571,7 @@ fn parse_bcif_to_coords(root: &MsgVal) -> Result<Coords, CoordsError> {
             b_factor: b_factor[i] as f32,
         });
 
-        chain_ids.push(label_asym_id[i].bytes().next().unwrap_or(b'A'));
+        chain_ids.push(chain_mapper.get_or_assign(&label_asym_id[i]));
 
         let mut rn = [b' '; 3];
         for (j, b) in label_comp_id[i].bytes().take(3).enumerate() {

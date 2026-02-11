@@ -92,6 +92,9 @@ impl RenderCoords {
         let mut current_chain_id: Option<u8> = None;
         let mut last_chain_id: Option<u8> = None;
         let mut last_res_num: Option<i32> = None;
+        let mut last_backbone_pos: Option<Vec3> = None;
+        /// Max distance between consecutive backbone atoms before chain break.
+        const BACKBONE_BREAK_DIST: f32 = 4.0;
 
         let mut current_n: Option<Vec3> = None;
         let mut current_ca: Option<Vec3> = None;
@@ -148,6 +151,14 @@ impl RenderCoords {
             let is_sequence_gap = last_res_num.map_or(false, |r| (res_num - r).abs() > 1);
             let is_new_residue = current_res_key.map_or(true, |k| k != res_key);
 
+            // Distance-based chain break: compare this atom to the last backbone
+            // atom in the current chain (catches GROMACS PDBs with no chain IDs).
+            let is_distance_break = if is_new_residue && atom_name == "N" {
+                last_backbone_pos.map_or(false, |p| pos.distance(p) > BACKBONE_BREAK_DIST)
+            } else {
+                false
+            };
+
             if is_new_residue && current_res_key.is_some() {
                 flush_residue(
                     &mut current_n, &mut current_ca, &mut current_c, &mut current_o,
@@ -155,7 +166,7 @@ impl RenderCoords {
                 );
             }
 
-            if (is_chain_break || is_sequence_gap) && !current_chain.is_empty() {
+            if (is_chain_break || is_sequence_gap || is_distance_break) && !current_chain.is_empty() {
                 backbone_chains.push(std::mem::take(&mut current_chain));
                 backbone_residue_chains.push(std::mem::take(&mut current_residues));
                 if let Some(cid) = current_chain_id {
@@ -167,9 +178,13 @@ impl RenderCoords {
             current_res_key = Some(res_key);
 
             match atom_name.as_str() {
-                "N" => current_n = Some(pos),
+                "N" => {
+                    current_n = Some(pos);
+                    last_backbone_pos = Some(pos);
+                }
                 "CA" => {
                     current_ca = Some(pos);
+                    last_backbone_pos = Some(pos);
                     if !residue_idx_map.contains_key(&res_key) {
                         residue_idx_map.insert(res_key, next_residue_idx);
                         next_residue_idx += 1;
@@ -179,7 +194,10 @@ impl RenderCoords {
                     }
                     last_res_num = Some(res_num);
                 }
-                "C" => current_c = Some(pos),
+                "C" => {
+                    current_c = Some(pos);
+                    last_backbone_pos = Some(pos);
+                }
                 "O" => current_o = Some(pos),
                 _ => {
                     let is_hydrogen = atom_name.starts_with('H')

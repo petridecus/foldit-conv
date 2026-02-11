@@ -2,11 +2,12 @@
 
 pub mod assembly;
 pub mod coords;
+pub mod density;
 pub mod entity;
 
 // Re-export commonly used items
 pub use coords::{
-    AtomMetadata, Coords, CoordsAtom, CoordsError, Element,
+    AtomMetadata, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element,
     ResidueAtoms, ValidationResult,
     // Binary serialization
     deserialize, serialize, atom_count, COORDS_MAGIC,
@@ -20,3 +21,4 @@ pub use assembly::{
     Assembly, CombinedSession, prepare_combined_session, split_combined_result,
     CombinedAssembly, prepare_combined_assembly,
 };
+pub use density::{DensityMap, DensityError};

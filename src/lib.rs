@@ -1,4 +1,5 @@
 pub mod adapters;
+pub mod cif;
 pub mod ffi;
 pub mod ops;
 pub mod render;
@@ -28,18 +29,25 @@ pub mod coords {
     pub use crate::types::entity;
     pub use crate::types::entity::{
         classify_residue, extract_by_type, merge_entities, split_into_entities, MoleculeEntity,
-        MoleculeType,
+        MoleculeType, NucleotideRing,
     };
 
     // Adapters
     pub use crate::adapters::bcif;
     pub use crate::adapters::bcif::{bcif_file_to_coords, bcif_to_coords};
+    pub use crate::adapters::dcd;
+    pub use crate::adapters::dcd::{dcd_file_to_frames, DcdFrame, DcdHeader, DcdReader};
+    pub use crate::adapters::mrc;
+    pub use crate::adapters::mrc::{mrc_file_to_density, mrc_to_density};
     pub use crate::adapters::pdb;
     pub use crate::adapters::pdb::{
         coords_to_pdb as coords_bytes_to_pdb, mmcif_file_to_coords, mmcif_str_to_coords,
-        mmcif_to_coords as mmcif_to_coords_internal, pdb_str_to_coords,
-        pdb_to_coords as pdb_to_coords_internal,
+        mmcif_to_coords as mmcif_to_coords_internal, pdb_file_to_coords, pdb_str_to_coords,
+        pdb_to_coords as pdb_to_coords_internal, structure_file_to_coords,
     };
+
+    // Density
+    pub use crate::types::density::{DensityMap, DensityError};
 
     // GPU
     pub use crate::render::gpu;

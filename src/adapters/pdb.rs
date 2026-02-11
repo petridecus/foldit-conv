@@ -6,7 +6,7 @@ use pdbtbx::{
 };
 use std::io::BufReader;
 
-use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, CoordsError, Element};
+use crate::types::coords::{deserialize, serialize, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element};
 
 /// Parse PDB format string to COORDS binary format.
 pub fn pdb_to_coords(pdb_str: &str) -> Result<Vec<u8>, CoordsError> {
@@ -37,6 +37,54 @@ pub fn mmcif_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsErro
     parse_structure_to_coords(&content, Format::Mmcif)
 }
 
+/// Load PDB file directly to Coords struct.
+///
+/// Sanitizes non-standard lines (e.g. GROMACS/MemProtMD output) before parsing.
+pub fn pdb_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| CoordsError::PdbParseError(format!("Failed to read file: {}", e)))?;
+    let sanitized = sanitize_pdb(&content);
+    parse_structure_to_coords(&sanitized, Format::Pdb)
+}
+
+/// Strip or fix PDB lines that cause pdbtbx to error even in Loose mode.
+/// GROMACS/MemProtMD PDBs have bare `REMARK    text` without the required
+/// remark number, which pdbtbx treats as InvalidatingError.
+fn sanitize_pdb(content: &str) -> String {
+    content
+        .lines()
+        .filter_map(|line| {
+            if line.starts_with("REMARK") {
+                // PDB spec: columns 8-10 should be a remark number.
+                // If there's no number, prefix one (0) so pdbtbx accepts it.
+                let after = &line[6..];
+                let trimmed = after.trim_start();
+                if trimmed.is_empty() || !trimmed.as_bytes()[0].is_ascii_digit() {
+                    Some(format!("REMARK   0 {}", trimmed))
+                } else {
+                    Some(line.to_string())
+                }
+            } else {
+                Some(line.to_string())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Load a structure file (PDB or mmCIF) by detecting format from extension.
+/// Falls back to mmCIF if extension is unrecognized.
+pub fn structure_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsError> {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "pdb" | "ent" => pdb_file_to_coords(path),
+        _ => mmcif_file_to_coords(path),
+    }
+}
+
 /// Internal function to parse either PDB or mmCIF using pdbtbx.
 fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, CoordsError> {
     let reader = BufReader::new(input.as_bytes());
@@ -60,6 +108,7 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
     let mut res_nums = Vec::new();
     let mut atom_names = Vec::new();
     let mut elements = Vec::new();
+    let mut chain_mapper = ChainIdMapper::new();
 
     for hier in pdb.atoms_with_hierarchy() {
         let atom = hier.atom();
@@ -75,7 +124,7 @@ fn parse_structure_to_coords(input: &str, format: Format) -> Result<Coords, Coor
             b_factor: atom.b_factor() as f32,
         });
 
-        chain_ids.push(chain.id().bytes().next().unwrap_or(b'A'));
+        chain_ids.push(chain_mapper.get_or_assign(chain.id()));
 
         let name = conformer.name();
         let mut res_name_bytes = [b' '; 3];

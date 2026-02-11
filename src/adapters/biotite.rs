@@ -5,7 +5,7 @@
 
 use pyo3::prelude::*;
 
-use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, Element};
+use crate::types::coords::{deserialize, serialize, ChainIdMapper, Coords, CoordsAtom, Element};
 
 /// Convert COORDS bytes directly to a Biotite AtomArray object.
 #[pyfunction]
@@ -120,6 +120,7 @@ pub fn atom_array_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u
     let mut res_names = Vec::with_capacity(num_atoms);
     let mut res_nums = Vec::with_capacity(num_atoms);
     let mut atom_names_vec = Vec::with_capacity(num_atoms);
+    let mut chain_mapper = ChainIdMapper::new();
 
     for i in 0..num_atoms {
         // Get coordinates
@@ -146,7 +147,7 @@ pub fn atom_array_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u
 
         // Chain ID
         let chain: String = chain_id.get_item(i)?.extract()?;
-        chain_ids.push(chain.bytes().next().unwrap_or(b'A'));
+        chain_ids.push(chain_mapper.get_or_assign(&chain));
 
         // Residue name
         let resname: String = res_name.get_item(i)?.extract()?;

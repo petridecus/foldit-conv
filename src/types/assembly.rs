@@ -138,18 +138,31 @@ impl Assembly {
     pub fn update_from_backend(&mut self, backend_coords: Coords) {
         use std::collections::HashSet;
 
+        eprintln!("[assembly::update_from_backend] incoming: {} atoms", backend_coords.num_atoms);
+
         // Split the backend export into entities to determine which types are present
         let new_entities = split_into_entities(&backend_coords);
+
+        eprintln!("[assembly::update_from_backend] new entities:");
+        for e in &new_entities {
+            eprintln!("  {:?}: {} atoms (chain {:?})",
+                e.molecule_type, e.coords.num_atoms,
+                e.coords.chain_ids.first().map(|&c| c as char));
+        }
 
         // Collect molecule types present in the export
         let exported_types: HashSet<MoleculeType> = new_entities.iter()
             .map(|e| e.molecule_type)
             .collect();
 
+        eprintln!("[assembly::update_from_backend] exported types: {:?}", exported_types);
+
         // Keep entities whose type was NOT exported (backend skipped them)
         let mut kept: Vec<MoleculeEntity> = self.entities.drain(..)
             .filter(|e| !exported_types.contains(&e.molecule_type))
             .collect();
+
+        eprintln!("[assembly::update_from_backend] kept {} entities from original", kept.len());
 
         // Combine: exported entities first, then kept entities
         let mut updated = new_entities;
@@ -162,6 +175,9 @@ impl Assembly {
 
         self.entities = updated;
         self.coords = merge_entities(&self.entities);
+
+        eprintln!("[assembly::update_from_backend] final: {} entities, {} total atoms",
+            self.entities.len(), self.coords.num_atoms);
     }
 }
 
@@ -639,7 +655,7 @@ mod tests {
 
         assembly.update_from_backend(backend_export);
 
-        // Should have 5 atoms: 3 protein (updated) + 1 ligand (preserved) + 1 water (preserved)
+        // Should have 5 atoms: 3 protein (updated) + 1 cofactor (preserved) + 1 water (preserved)
         assert_eq!(assembly.coords().num_atoms, 5);
         assert_eq!(assembly.entities().len(), 3);
 
@@ -649,12 +665,12 @@ mod tests {
             .collect();
         assert!((protein[0].coords.atoms[0].x - 20.0).abs() < 1e-6);
 
-        // Ligand preserved
-        let ligand: Vec<_> = assembly.entities().iter()
-            .filter(|e| e.molecule_type == MoleculeType::Ligand)
+        // ATP is now classified as Cofactor, preserved from original
+        let cofactor: Vec<_> = assembly.entities().iter()
+            .filter(|e| e.molecule_type == MoleculeType::Cofactor)
             .collect();
-        assert_eq!(ligand.len(), 1);
-        assert!((ligand[0].coords.atoms[0].x - 3.0).abs() < 1e-6); // original x=3.0
+        assert_eq!(cofactor.len(), 1);
+        assert!((cofactor[0].coords.atoms[0].x - 3.0).abs() < 1e-6); // original x=3.0
 
         // Water preserved
         let water: Vec<_> = assembly.entities().iter()
@@ -667,7 +683,7 @@ mod tests {
     fn test_assembly_bytes_roundtrip_mixed() {
         use crate::types::coords::deserialize_assembly;
 
-        // Build assembly with protein + ligand + ion
+        // Build assembly with protein + cofactor (ATP) + ion
         let coords = Coords {
             num_atoms: 5,
             atoms: vec![
@@ -688,7 +704,7 @@ mod tests {
         };
 
         let assembly = Assembly::from_coords(coords, "test");
-        assert!(assembly.entities().len() >= 3); // protein, ligand, ion
+        assert!(assembly.entities().len() >= 3); // protein, cofactor, ion
 
         let bytes = assembly.assembly_bytes().unwrap();
         assert_eq!(&bytes[0..8], b"ASSEM01\0");

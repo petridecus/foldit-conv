@@ -198,6 +198,50 @@ pub enum CoordsError {
     SerializationError(String),
 }
 
+/// Maps multi-character chain ID strings to unique `u8` values.
+///
+/// Structures with >26 chains (ribosomes, virus capsids) use multi-character
+/// chain IDs in mmCIF format (e.g., "AA", "AB"). Since `Coords.chain_ids` stores
+/// a single `u8` per atom, this mapper assigns a unique byte to each distinct
+/// chain string, preventing collisions that cause cross-chain rendering artifacts.
+///
+/// Assigns printable ASCII characters (A-Z, a-z, 0-9, then other printable chars)
+/// so that PDB export produces valid chain ID columns.
+pub struct ChainIdMapper {
+    map: std::collections::HashMap<String, u8>,
+    next_idx: usize,
+}
+
+/// Printable chain ID characters in conventional order: A-Z, a-z, 0-9, then
+/// remaining printable ASCII. Covers up to 94 unique chains.
+const CHAIN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~";
+
+impl ChainIdMapper {
+    pub fn new() -> Self {
+        Self {
+            map: std::collections::HashMap::new(),
+            next_idx: 0,
+        }
+    }
+
+    /// Get or assign a unique `u8` for the given chain ID string.
+    pub fn get_or_assign(&mut self, chain_id: &str) -> u8 {
+        if let Some(&id) = self.map.get(chain_id) {
+            return id;
+        }
+        let byte = if self.next_idx < CHAIN_CHARS.len() {
+            CHAIN_CHARS[self.next_idx]
+        } else {
+            // Fallback for >94 chains: use raw sequential bytes past printable range.
+            // Extremely rare — only theoretical virus capsids approach this.
+            (self.next_idx - CHAIN_CHARS.len()) as u8
+        };
+        self.next_idx += 1;
+        self.map.insert(chain_id.to_string(), byte);
+        byte
+    }
+}
+
 /// Single atom with coordinates and crystallographic factors.
 #[derive(Debug, Clone)]
 pub struct CoordsAtom {
