@@ -49,7 +49,7 @@ pub extern "C" fn coords_free_result(result: *const CoordsResult) {
             let _ = Vec::from_raw_parts(r.data as *mut u8, r.len, r.len);
         }
         if !r.error.is_null() {
-            let _ = CString::from_raw(r.error as *mut i8);
+            let _ = CString::from_raw(r.error as *mut std::os::raw::c_char);
         }
     }
 }
@@ -58,7 +58,7 @@ pub extern "C" fn coords_free_result(result: *const CoordsResult) {
 pub extern "C" fn coords_free_string(s: *const c_char) {
     if !s.is_null() {
         unsafe {
-            let _ = CString::from_raw(s as *mut i8);
+            let _ = CString::from_raw(s as *mut std::os::raw::c_char);
         }
     }
 }
