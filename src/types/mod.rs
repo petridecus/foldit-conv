@@ -18,7 +18,10 @@ pub use entity::{
     MoleculeEntity, MoleculeType,
 };
 pub use assembly::{
-    Assembly, CombinedSession, prepare_combined_session, split_combined_result,
+    CombinedSession, prepare_combined_session, split_combined_result,
     CombinedAssembly, prepare_combined_assembly,
+    // Free functions (replace Assembly struct methods)
+    protein_coords, protein_coords_bytes, assembly_bytes, ca_positions, residue_count,
+    update_protein_entities, update_entities_from_backend,
 };
 pub use density::{DensityMap, DensityError};

@@ -1,4 +1,4 @@
-//! GPU-friendly extraction functions for foldit-render integration.
+//! GPU-friendly extraction functions for viso renderer integration.
 
 use crate::types::coords::{deserialize, AtomMetadata, CoordsError};
 
@@ -24,21 +24,13 @@ fn atom_name_to_type_index(name: &[u8; 4]) -> u8 {
 /// Extract positions array suitable for GPU upload.
 pub fn to_positions_f32(coords_bytes: &[u8]) -> Result<Vec<[f32; 4]>, CoordsError> {
     let coords = deserialize(coords_bytes)?;
-    Ok(coords
-        .atoms
-        .iter()
-        .map(|a| [a.x, a.y, a.z, 1.0])
-        .collect())
+    Ok(coords.atoms.iter().map(|a| [a.x, a.y, a.z, 1.0]).collect())
 }
 
 /// Extract positions as flat f32 array [x0, y0, z0, x1, y1, z1, ...].
 pub fn to_positions_flat(coords_bytes: &[u8]) -> Result<Vec<f32>, CoordsError> {
     let coords = deserialize(coords_bytes)?;
-    Ok(coords
-        .atoms
-        .iter()
-        .flat_map(|a| [a.x, a.y, a.z])
-        .collect())
+    Ok(coords.atoms.iter().flat_map(|a| [a.x, a.y, a.z]).collect())
 }
 
 /// Extract atom metadata for GPU uniform buffers.

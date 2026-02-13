@@ -93,6 +93,21 @@ pub fn coords_to_biotite_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResu
     let element_np = element_np.call_method1("astype", ("U2",))?;
     atom_array.setattr("element", element_np)?;
 
+    // Occupancy — all atoms in COORDS are resolved, so set to 1.0.
+    // Without this, biotite defaults to 0.0 and downstream transforms
+    // (e.g. MaskResiduesWithSpecificUnresolvedAtoms) treat every atom as
+    // unresolved, ultimately producing an empty AtomArray.
+    let occupancy_data: Vec<f32> = coords.atoms.iter().map(|a| a.occupancy).collect();
+    let occ_np = numpy.call_method1("array", (occupancy_data,))?;
+    let occ_np = occ_np.call_method1("astype", (numpy.getattr("float32")?,))?;
+    atom_array.setattr("occupancy", occ_np)?;
+
+    // B-factor
+    let bfactor_data: Vec<f32> = coords.atoms.iter().map(|a| a.b_factor).collect();
+    let bf_np = numpy.call_method1("array", (bfactor_data,))?;
+    let bf_np = bf_np.call_method1("astype", (numpy.getattr("float32")?,))?;
+    atom_array.setattr("b_factor", bf_np)?;
+
     // Create empty BondList (required by some biotite functions)
     let bond_list = bond_list_class.call1((num_atoms,))?;
     atom_array.setattr("bonds", bond_list)?;
