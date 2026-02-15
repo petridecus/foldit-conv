@@ -107,25 +107,14 @@ fn foldit_conv(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python::deserialize_coords_py, m)?)?;
     m.add_function(wrap_pyfunction!(python::coords_to_atom_array, m)?)?;
 
-    // Biotite adapter (used by RC-Foundry models: RFDiffusion3, RosettaFold3, LigandMPNN)
-    m.add_function(wrap_pyfunction!(
-        adapters::biotite::coords_to_biotite_atom_array,
-        m
-    )?)?;
-    m.add_function(wrap_pyfunction!(adapters::biotite::atom_array_to_coords, m)?)?;
-
-    // ESMFold adapter
-    m.add_function(wrap_pyfunction!(adapters::esmfold::esmfold_to_coords, m)?)?;
-    m.add_function(wrap_pyfunction!(
-        adapters::esmfold::esmfold_atom14_to_coords,
-        m
-    )?)?;
-
-    // SimpleFold adapter (Boltz)
-    m.add_function(wrap_pyfunction!(
-        adapters::simplefold::simplefold_to_coords,
-        m
-    )?)?;
+    // AtomWorks adapter (entity-aware, preserves molecule types and bonds)
+    m.add_function(wrap_pyfunction!(adapters::atomworks::entities_to_atomworks, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::atomworks_to_entities, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::coords_to_atomworks, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::atomworks_to_coords, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::entities_to_atomworks_parsed, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::atomworks_parse_to_entities, m)?)?;
+    m.add_function(wrap_pyfunction!(adapters::atomworks::atomworks_parse_full, m)?)?;
 
     Ok(())
 }

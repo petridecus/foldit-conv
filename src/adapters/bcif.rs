@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::types::coords::{ChainIdMapper, Coords, CoordsAtom, CoordsError, Element};
+use crate::types::entity::{split_into_entities, MoleculeEntity};
 
 /// Load a BinaryCIF file and convert to Coords.
 pub fn bcif_file_to_coords(path: &Path) -> Result<Coords, CoordsError> {
@@ -651,4 +652,20 @@ fn decode_string_col(col_map: &HashMap<&str, &MsgVal>, name: &str, expected: usi
         ColData::StringArray(v) => Err(CoordsError::InvalidFormat(format!("Column '{}': expected {} rows, got {}", name, expected, v.len()))),
         _ => Err(CoordsError::InvalidFormat(format!("Column '{}': expected string array", name))),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Entity-returning variants
+// ---------------------------------------------------------------------------
+
+/// Decode BinaryCIF bytes to entity list.
+pub fn bcif_to_entities(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = bcif_to_coords(bytes)?;
+    Ok(split_into_entities(&coords))
+}
+
+/// Load a BinaryCIF file and convert to entity list.
+pub fn bcif_file_to_entities(path: &Path) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = bcif_file_to_coords(path)?;
+    Ok(split_into_entities(&coords))
 }

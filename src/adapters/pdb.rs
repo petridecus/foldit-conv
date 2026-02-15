@@ -7,6 +7,7 @@ use pdbtbx::{
 use std::io::BufReader;
 
 use crate::types::coords::{deserialize, serialize, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element};
+use crate::types::entity::{split_into_entities, MoleculeEntity};
 
 /// Parse PDB format string to COORDS binary format.
 pub fn pdb_to_coords(pdb_str: &str) -> Result<Vec<u8>, CoordsError> {
@@ -198,4 +199,38 @@ pub fn coords_to_pdb(coords_bytes: &[u8]) -> Result<String, CoordsError> {
     pdb_string.push_str("END\n");
 
     Ok(pdb_string)
+}
+
+// ---------------------------------------------------------------------------
+// Entity-returning variants
+// ---------------------------------------------------------------------------
+
+/// Parse PDB format string to entity list.
+pub fn pdb_str_to_entities(pdb_str: &str) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = parse_structure_to_coords(pdb_str, Format::Pdb)?;
+    Ok(split_into_entities(&coords))
+}
+
+/// Parse mmCIF format string to entity list.
+pub fn mmcif_str_to_entities(cif_str: &str) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = parse_structure_to_coords(cif_str, Format::Mmcif)?;
+    Ok(split_into_entities(&coords))
+}
+
+/// Load PDB file to entity list.
+pub fn pdb_file_to_entities(path: &std::path::Path) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = pdb_file_to_coords(path)?;
+    Ok(split_into_entities(&coords))
+}
+
+/// Load mmCIF file to entity list.
+pub fn mmcif_file_to_entities(path: &std::path::Path) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = mmcif_file_to_coords(path)?;
+    Ok(split_into_entities(&coords))
+}
+
+/// Load structure file (PDB or mmCIF, detected by extension) to entity list.
+pub fn structure_file_to_entities(path: &std::path::Path) -> Result<Vec<MoleculeEntity>, CoordsError> {
+    let coords = structure_file_to_coords(path)?;
+    Ok(split_into_entities(&coords))
 }
