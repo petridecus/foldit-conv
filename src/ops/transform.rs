@@ -5,7 +5,10 @@
 //! - Atom filtering
 //! - Kabsch alignment
 
-use crate::types::coords::{deserialize, serialize, Coords, CoordsAtom, CoordsError, Element};
+use crate::types::coords::{
+    deserialize, serialize, Coords, CoordsAtom, CoordsError, Element,
+    ASSEMBLY_MAGIC, deserialize_assembly, serialize_assembly,
+};
 use glam::{Mat3, Vec3};
 
 /// Maximum distance (Å) between consecutive backbone atoms before we call it
@@ -494,15 +497,52 @@ pub fn align_to_reference(
     Ok(())
 }
 
-/// Align COORDS bytes to match reference CA positions.
-/// Returns new aligned COORDS bytes.
+/// Align coordinate bytes to match reference CA positions.
+/// Supports both COORDS and ASSEM01 formats — detects automatically.
+/// Returns new aligned bytes in the same format as the input.
 pub fn align_coords_bytes(
     coords_bytes: &[u8],
     reference_ca: &[Vec3],
 ) -> Result<Vec<u8>, CoordsError> {
-    let mut coords = deserialize(coords_bytes)?;
-    align_to_reference(&mut coords, reference_ca)?;
-    serialize(&coords)
+    if coords_bytes.len() >= 8 && &coords_bytes[0..8] == ASSEMBLY_MAGIC {
+        align_assembly_bytes(coords_bytes, reference_ca)
+    } else {
+        let mut coords = deserialize(coords_bytes)?;
+        align_to_reference(&mut coords, reference_ca)?;
+        serialize(&coords)
+    }
+}
+
+/// Align ASSEM01 bytes to match reference CA positions.
+/// Merges entities to extract CA, computes Kabsch, applies to each entity,
+/// then re-serializes as ASSEM01.
+fn align_assembly_bytes(
+    coords_bytes: &[u8],
+    reference_ca: &[Vec3],
+) -> Result<Vec<u8>, CoordsError> {
+    let mut entities = deserialize_assembly(coords_bytes)?;
+
+    // Merge all entities into flat coords to extract CA positions
+    let merged = crate::types::entity::merge_entities(&entities);
+    let predicted_ca = extract_ca_positions(&merged);
+
+    if predicted_ca.len() != reference_ca.len() {
+        return Err(CoordsError::InvalidFormat(format!(
+            "CA count mismatch: reference={}, assembly={}",
+            reference_ca.len(),
+            predicted_ca.len()
+        )));
+    }
+
+    let (rotation, translation) = kabsch_alignment(reference_ca, &predicted_ca)
+        .ok_or_else(|| CoordsError::InvalidFormat("Kabsch alignment failed".to_string()))?;
+
+    // Apply same transform to every entity
+    for entity in &mut entities {
+        transform_coords(&mut entity.coords, rotation, translation);
+    }
+
+    serialize_assembly(&entities)
 }
 
 // ============================================================================
