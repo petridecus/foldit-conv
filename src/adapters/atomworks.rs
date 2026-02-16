@@ -24,13 +24,14 @@
 //! from atomworks.io.parser import parse as aw_parse
 //!
 //! # ── molconv → AtomWorks (for model inference) ──
-//! atom_array = foldit_conv.entities_to_atomworks(assembly_bytes)
+//! atom_array = foldit_conv.entities_to_atom_array(assembly_bytes)
+//! atom_array_plus = foldit_conv.entities_to_atom_array_plus(assembly_bytes)
 //!
-//! # ── AtomWorks → molconv (after model prediction) ──
-//! assembly_bytes = foldit_conv.atomworks_to_entities(atom_array)
+//! # ── AtomArray → molconv (after model prediction) ──
+//! assembly_bytes = foldit_conv.atom_array_to_entities(atom_array)
 //!
 //! # ── Full AtomWorks cleaning pipeline ──
-//! atom_array = foldit_conv.entities_to_atomworks_parsed(assembly_bytes, "3nez.cif.gz")
+//! atom_array = foldit_conv.entities_to_atom_array_parsed(assembly_bytes, "3nez.cif.gz")
 //! ```
 
 use pyo3::prelude::*;
@@ -282,38 +283,56 @@ fn entities_to_atom_array_impl(
     Ok(atom_array.unbind())
 }
 
-/// Convert `Vec<MoleculeEntity>` (from ASSEM01 bytes) to an AtomWorks AtomArray.
-///
-/// This is the primary export for the runner's Foundry backends.
+/// Convert `Vec<MoleculeEntity>` (from ASSEM01 bytes) to a Biotite `AtomArray`.
 #[pyfunction]
-pub fn entities_to_atomworks(py: Python, assembly_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
+pub fn entities_to_atom_array(py: Python, assembly_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
     let entities = deserialize_assembly(&assembly_bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
-
     entities_to_atom_array_impl(py, &entities)
 }
 
-/// Convert flat COORDS bytes to an AtomWorks AtomArray.
+/// Convert `Vec<MoleculeEntity>` (from ASSEM01 bytes) to an `AtomArrayPlus`.
 ///
-/// This is the drop-in replacement for the old `coords_to_biotite_atom_array`:
-/// it deserializes the COORDS, splits into entities (to get molecule type info),
-/// and builds a fully annotated AtomArray with bonds.
+/// `AtomArrayPlus` signals to downstream consumers (e.g. `parse_atom_array`)
+/// that the structure is already fully constructed and should skip CCD
+/// template rebuilding.
 #[pyfunction]
-pub fn coords_to_atomworks(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
+pub fn entities_to_atom_array_plus(py: Python, assembly_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
+    let entities = deserialize_assembly(&assembly_bytes)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+    let atom_array = entities_to_atom_array_impl(py, &entities)?;
+    let as_plus = py
+        .import("atomworks.io.utils.atom_array_plus")?
+        .getattr("as_atom_array_plus")?;
+    Ok(as_plus.call1((atom_array,))?.unbind())
+}
+
+/// Convert flat COORDS bytes to a Biotite `AtomArray`.
+#[pyfunction]
+pub fn coords_to_atom_array(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
     let coords = deserialize(&coords_bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
     let entities = split_into_entities(&coords);
     entities_to_atom_array_impl(py, &entities)
 }
 
-/// Convert an AtomWorks/Biotite AtomArray back to flat COORDS bytes.
-///
-/// This is the drop-in replacement for the old `atom_array_to_coords`:
-/// it round-trips through ASSEM01 internally but returns COORDS format
-/// (merged entities) for callers that expect flat coordinates.
+/// Convert flat COORDS bytes to an `AtomArrayPlus`.
 #[pyfunction]
-pub fn atomworks_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u8>> {
-    let assembly_bytes = atomworks_to_entities(py, atom_array)?;
+pub fn coords_to_atom_array_plus(py: Python, coords_bytes: Vec<u8>) -> PyResult<Py<PyAny>> {
+    let coords = deserialize(&coords_bytes)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+    let entities = split_into_entities(&coords);
+    let atom_array = entities_to_atom_array_impl(py, &entities)?;
+    let as_plus = py
+        .import("atomworks.io.utils.atom_array_plus")?
+        .getattr("as_atom_array_plus")?;
+    Ok(as_plus.call1((atom_array,))?.unbind())
+}
+
+/// Convert a Biotite `AtomArray` (or `AtomArrayPlus`) back to flat COORDS bytes.
+#[pyfunction]
+pub fn atom_array_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u8>> {
+    let assembly_bytes = atom_array_to_entities(py, atom_array)?;
     let entities = deserialize_assembly(&assembly_bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
     let coords = crate::types::entity::merge_entities(&entities);
@@ -330,9 +349,9 @@ pub fn atomworks_to_coords(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u8
 ///
 /// Use this when you need maximum data quality for model training or
 /// when handling structures with known issues (missing atoms, wrong charges).
-/// For interactive use where latency matters, prefer `entities_to_atomworks`.
+/// For interactive use where latency matters, prefer `entities_to_atom_array`.
 #[pyfunction]
-pub fn entities_to_atomworks_parsed(
+pub fn entities_to_atom_array_parsed(
     py: Python,
     assembly_bytes: Vec<u8>,
     source_path: Option<String>,
@@ -354,7 +373,7 @@ pub fn entities_to_atomworks_parsed(
     // Fallback: convert through our adapter, then apply AtomWorks transforms
     // manually for cleaning. This is less thorough than parsing from file
     // but still better than raw conversion.
-    let atom_array = entities_to_atomworks(py, assembly_bytes)?;
+    let atom_array = entities_to_atom_array(py, assembly_bytes)?;
 
     // Try to apply basic AtomWorks cleaning if available
     match py.import("atomworks.io.cleaning") {
@@ -373,18 +392,13 @@ pub fn entities_to_atomworks_parsed(
 // AtomWorks → molconv (annotated AtomArray → entities)
 // ============================================================================
 
-/// Convert an AtomWorks-annotated Biotite `AtomArray` back to ASSEM01 bytes.
+/// Convert a Biotite `AtomArray` (or `AtomArrayPlus`) back to ASSEM01 bytes.
 ///
-/// This reconstructs `Vec<MoleculeEntity>` from the AtomArray's per-atom
-/// annotations. Entity boundaries are determined by:
-///
-/// 1. `entity_id` annotation (if present, from our own export or AtomWorks parse)
-/// 2. Fallback: group by `(chain_id, mol_type)` to reconstruct entities
-///
-/// The resulting ASSEM01 bytes can be deserialized on the Rust side and
-/// fed back into the shared state / triple buffers.
+/// Reconstructs `Vec<MoleculeEntity>` from per-atom annotations.
+/// Entity boundaries are determined by `entity_id` annotation if present,
+/// otherwise by grouping on `(chain_id, mol_type)`.
 #[pyfunction]
-pub fn atomworks_to_entities(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u8>> {
+pub fn atom_array_to_entities(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<u8>> {
     let atom_array = atom_array.bind(py);
 
     // Get array length
@@ -571,17 +585,16 @@ pub fn atomworks_to_entities(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec<
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
 
-/// Convert an AtomWorks AtomArray to `Vec<MoleculeEntity>` (Rust structs, not bytes).
+/// Convert an AtomArray to `Vec<MoleculeEntity>` (Rust structs, not bytes).
 ///
 /// For use within the runner when you need Rust-side entity objects directly
 /// rather than going through ASSEM01 serialization.
-pub fn atom_array_to_entities(
+pub fn atom_array_to_entity_vec(
     py: Python,
     atom_array: &Bound<'_, PyAny>,
 ) -> PyResult<Vec<MoleculeEntity>> {
-    // Reuse the byte-based path and deserialize
     let atom_array_py: Py<PyAny> = atom_array.clone().unbind();
-    let bytes = atomworks_to_entities(py, atom_array_py)?;
+    let bytes = atom_array_to_entities(py, atom_array_py)?;
     deserialize_assembly(&bytes)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
 }
@@ -597,7 +610,7 @@ pub fn atom_array_to_entities(
 /// is available: it gets CCD bond lookup, leaving group removal, charge
 /// correction, occupancy handling, and all other AtomWorks cleaning steps.
 #[pyfunction]
-pub fn atomworks_parse_to_entities(
+pub fn parse_file_to_entities(
     py: Python,
     file_path: String,
 ) -> PyResult<Vec<u8>> {
@@ -608,7 +621,7 @@ pub fn atomworks_parse_to_entities(
     let atom_array = asym_unit.get_item(0)?; // First model
 
     let atom_array_py: Py<PyAny> = atom_array.unbind();
-    atomworks_to_entities(py, atom_array_py)
+    atom_array_to_entities(py, atom_array_py)
 }
 
 /// Load a structure file through AtomWorks and return chain metadata.
@@ -618,7 +631,7 @@ pub fn atomworks_parse_to_entities(
 /// - `"chain_info"`: dict of chain_id → { "sequence": str, ... }
 /// - `"assemblies"`: dict of assembly_id → ASSEM01 bytes for each bio assembly
 #[pyfunction]
-pub fn atomworks_parse_full(
+pub fn parse_file_full(
     py: Python,
     file_path: String,
 ) -> PyResult<Py<PyAny>> {
@@ -630,7 +643,7 @@ pub fn atomworks_parse_full(
     // Convert asymmetric unit
     let asym_unit = result.get_item("asym_unit")?;
     let atom_array = asym_unit.get_item(0)?;
-    let asym_bytes = atomworks_to_entities(py, atom_array.unbind())?;
+    let asym_bytes = atom_array_to_entities(py, atom_array.unbind())?;
     out.set_item("assembly_bytes", asym_bytes)?;
 
     // Pass through chain_info directly (Python dict)
@@ -647,7 +660,7 @@ pub fn atomworks_parse_full(
                         let key: String = item.get_item(0i32)?.extract()?;
                         let stack = item.get_item(1i32)?;
                         let aa = stack.get_item(0i32)?;
-                        match atomworks_to_entities(py, aa.unbind()) {
+                        match atom_array_to_entities(py, aa.unbind()) {
                             Ok(bytes) => {
                                 assemblies_dict.set_item(key, bytes)?;
                             }
