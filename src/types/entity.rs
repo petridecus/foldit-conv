@@ -58,6 +58,55 @@ impl MoleculeType {
     }
 }
 
+/// Axis-aligned bounding box (AABB).
+#[derive(Debug, Clone, Copy)]
+pub struct Aabb {
+    pub min: glam::Vec3,
+    pub max: glam::Vec3,
+}
+
+impl Aabb {
+    /// Geometric center of the box.
+    pub fn center(&self) -> glam::Vec3 {
+        (self.min + self.max) * 0.5
+    }
+
+    /// Size along each axis (max - min).
+    pub fn extents(&self) -> glam::Vec3 {
+        self.max - self.min
+    }
+
+    /// Half-diagonal length (bounding sphere radius from center).
+    pub fn radius(&self) -> f32 {
+        self.extents().length() * 0.5
+    }
+
+    /// Merge two AABBs into one that contains both.
+    pub fn union(&self, other: &Aabb) -> Aabb {
+        Aabb {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+        }
+    }
+
+    /// Build AABB from positions. Returns `None` if the slice is empty.
+    pub fn from_positions(positions: &[glam::Vec3]) -> Option<Aabb> {
+        let first = *positions.first()?;
+        let mut min = first;
+        let mut max = first;
+        for &p in &positions[1..] {
+            min = min.min(p);
+            max = max.max(p);
+        }
+        Some(Aabb { min, max })
+    }
+
+    /// Build unified AABB from multiple AABBs.
+    pub fn from_aabbs(aabbs: &[Aabb]) -> Option<Aabb> {
+        aabbs.iter().copied().reduce(|a, b| a.union(&b))
+    }
+}
+
 /// A single entity: one logical molecule (a protein chain, a ligand, waters, etc.)
 /// with its own coordinate set.
 #[derive(Debug, Clone)]
@@ -99,6 +148,11 @@ fn is_purine(res_name: &str) -> bool {
 }
 
 impl MoleculeEntity {
+    /// Compute the axis-aligned bounding box for this entity's atoms.
+    pub fn aabb(&self) -> Option<Aabb> {
+        Aabb::from_positions(&self.positions())
+    }
+
     /// All atom positions as Vec3.
     pub fn positions(&self) -> Vec<glam::Vec3> {
         self.coords
@@ -885,5 +939,61 @@ mod tests {
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].molecule_type, MoleculeType::Solvent);
         assert_eq!(entities[0].coords.num_atoms, 3);
+    }
+
+    #[test]
+    fn test_aabb_from_positions() {
+        let positions = vec![
+            glam::Vec3::new(1.0, 2.0, 3.0),
+            glam::Vec3::new(-1.0, 5.0, 0.0),
+            glam::Vec3::new(3.0, -2.0, 7.0),
+        ];
+        let aabb = Aabb::from_positions(&positions).unwrap();
+        assert_eq!(aabb.min, glam::Vec3::new(-1.0, -2.0, 0.0));
+        assert_eq!(aabb.max, glam::Vec3::new(3.0, 5.0, 7.0));
+    }
+
+    #[test]
+    fn test_aabb_empty() {
+        assert!(Aabb::from_positions(&[]).is_none());
+    }
+
+    #[test]
+    fn test_aabb_union() {
+        let a = Aabb {
+            min: glam::Vec3::new(0.0, 0.0, 0.0),
+            max: glam::Vec3::new(1.0, 1.0, 1.0),
+        };
+        let b = Aabb {
+            min: glam::Vec3::new(-1.0, 2.0, -3.0),
+            max: glam::Vec3::new(0.5, 4.0, 0.5),
+        };
+        let merged = a.union(&b);
+        assert_eq!(merged.min, glam::Vec3::new(-1.0, 0.0, -3.0));
+        assert_eq!(merged.max, glam::Vec3::new(1.0, 4.0, 1.0));
+    }
+
+    #[test]
+    fn test_aabb_from_aabbs() {
+        let aabbs = vec![
+            Aabb { min: glam::Vec3::ZERO, max: glam::Vec3::ONE },
+            Aabb { min: glam::Vec3::splat(2.0), max: glam::Vec3::splat(3.0) },
+        ];
+        let merged = Aabb::from_aabbs(&aabbs).unwrap();
+        assert_eq!(merged.min, glam::Vec3::ZERO);
+        assert_eq!(merged.max, glam::Vec3::splat(3.0));
+        assert!(Aabb::from_aabbs(&[]).is_none());
+    }
+
+    #[test]
+    fn test_aabb_center_extents_radius() {
+        let aabb = Aabb {
+            min: glam::Vec3::ZERO,
+            max: glam::Vec3::new(4.0, 6.0, 8.0),
+        };
+        assert_eq!(aabb.center(), glam::Vec3::new(2.0, 3.0, 4.0));
+        assert_eq!(aabb.extents(), glam::Vec3::new(4.0, 6.0, 8.0));
+        let expected_radius = glam::Vec3::new(4.0, 6.0, 8.0).length() * 0.5;
+        assert!((aabb.radius() - expected_radius).abs() < 1e-6);
     }
 }

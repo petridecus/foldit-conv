@@ -11,21 +11,14 @@ use crate::types::coords::{
 };
 use glam::{Mat3, Vec3};
 
-/// Maximum distance (Å) between consecutive backbone atoms before we call it
-/// a chain break.  The C→N peptide bond is ~1.33 Å; anything above 4 Å is
-/// certainly not a covalent bond.
-const BACKBONE_BREAK_DIST: f32 = 4.0;
-
 /// Extract backbone chains from COORDS data.
 /// Returns a vector of chains, where each chain is a sequence of N-CA-C positions.
-/// Chain breaks are detected by chain ID change, residue number gap, **or**
-/// spatial distance (handles GROMACS PDBs with no chain IDs).
+/// Chain breaks are detected by chain ID change or residue number gap.
 pub fn extract_backbone_chains(coords: &Coords) -> Vec<Vec<Vec3>> {
     let mut chains: Vec<Vec<Vec3>> = Vec::new();
     let mut current_chain: Vec<Vec3> = Vec::new();
     let mut last_chain_id: Option<u8> = None;
     let mut last_res_num: Option<i32> = None;
-    let mut last_pos: Option<Vec3> = None;
 
     for i in 0..coords.num_atoms {
         let atom_name = std::str::from_utf8(&coords.atom_names[i])
@@ -41,18 +34,15 @@ pub fn extract_backbone_chains(coords: &Coords) -> Vec<Vec<Vec3>> {
         let res_num = coords.res_nums[i];
         let pos = Vec3::new(coords.atoms[i].x, coords.atoms[i].y, coords.atoms[i].z);
 
-        // Check for chain break
         let is_chain_break = last_chain_id.map_or(false, |c| c != chain_id);
         let is_sequence_gap = last_res_num.map_or(false, |r| (res_num - r).abs() > 1);
-        let is_distance_break = last_pos.map_or(false, |p| pos.distance(p) > BACKBONE_BREAK_DIST);
 
-        if (is_chain_break || is_sequence_gap || is_distance_break) && !current_chain.is_empty() {
+        if (is_chain_break || is_sequence_gap) && !current_chain.is_empty() {
             chains.push(std::mem::take(&mut current_chain));
         }
 
         current_chain.push(pos);
         last_chain_id = Some(chain_id);
-        last_pos = Some(pos);
 
         if atom_name == "CA" {
             last_res_num = Some(res_num);
