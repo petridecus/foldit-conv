@@ -453,7 +453,7 @@ fn decode_run_length(input: ColData, _enc: &MsgVal) -> Result<ColData, CoordsErr
     for pair in ints.chunks_exact(2) {
         let value = pair[0];
         let count = pair[1] as usize;
-        result.extend(std::iter::repeat(value).take(count));
+        result.extend(std::iter::repeat_n(value, count));
     }
     Ok(ColData::IntArray(result))
 }

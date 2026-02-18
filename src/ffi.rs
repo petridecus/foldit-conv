@@ -38,19 +38,19 @@ impl CoordsResult {
     }
 }
 
+/// # Safety
+/// `result` must be a valid pointer returned by a `coords_*` FFI function, or null.
 #[no_mangle]
-pub extern "C" fn coords_free_result(result: *const CoordsResult) {
+pub unsafe extern "C" fn coords_free_result(result: *const CoordsResult) {
     if result.is_null() {
         return;
     }
-    unsafe {
-        let r = &*result;
-        if !r.data.is_null() && r.len > 0 {
-            let _ = Vec::from_raw_parts(r.data as *mut u8, r.len, r.len);
-        }
-        if !r.error.is_null() {
-            let _ = CString::from_raw(r.error as *mut std::os::raw::c_char);
-        }
+    let r = &*result;
+    if !r.data.is_null() && r.len > 0 {
+        let _ = Vec::from_raw_parts(r.data as *mut u8, r.len, r.len);
+    }
+    if !r.error.is_null() {
+        let _ = CString::from_raw(r.error as *mut std::os::raw::c_char);
     }
 }
 
@@ -81,8 +81,10 @@ pub extern "C" fn pdb_to_coords_bytes(pdb_ptr: *const c_char, pdb_len: usize) ->
     }
 }
 
+/// # Safety
+/// `coords_ptr` must point to `coords_len` valid bytes. `out_len` must be a valid, non-null pointer.
 #[no_mangle]
-pub extern "C" fn coords_to_pdb(
+pub unsafe extern "C" fn coords_to_pdb(
     coords_ptr: *const u8,
     coords_len: usize,
     out_len: *mut usize,
@@ -97,31 +99,29 @@ pub extern "C" fn coords_to_pdb(
             .unwrap()
             .into_raw();
     }
-    unsafe {
-        let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
-        match crate::adapters::pdb::coords_to_pdb(coords_slice) {
-            Ok(pdb_string) => {
-                *out_len = pdb_string.len();
-                std::ffi::CString::new(pdb_string).unwrap().into_raw()
-            }
-            Err(e) => std::ffi::CString::new(e.to_string()).unwrap().into_raw(),
+    let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
+    match crate::adapters::pdb::coords_to_pdb(coords_slice) {
+        Ok(pdb_string) => {
+            *out_len = pdb_string.len();
+            std::ffi::CString::new(pdb_string).unwrap().into_raw()
         }
+        Err(e) => std::ffi::CString::new(e.to_string()).unwrap().into_raw(),
     }
 }
 
+/// # Safety
+/// `coords_ptr` must point to `coords_len` valid bytes.
 #[no_mangle]
-pub extern "C" fn coords_from_coords(coords_ptr: *const u8, coords_len: usize) -> CoordsResult {
+pub unsafe extern "C" fn coords_from_coords(coords_ptr: *const u8, coords_len: usize) -> CoordsResult {
     if coords_ptr.is_null() {
         return CoordsResult::error("Coords data is null");
     }
-    unsafe {
-        let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
-        match crate::types::coords::deserialize(coords_slice)
-            .and_then(|coords| crate::types::coords::serialize(&coords))
-        {
-            Ok(coords_bytes) => CoordsResult::success(coords_bytes),
-            Err(e) => CoordsResult::error(&e.to_string()),
-        }
+    let coords_slice = std::slice::from_raw_parts(coords_ptr, coords_len);
+    match crate::types::coords::deserialize(coords_slice)
+        .and_then(|coords| crate::types::coords::serialize(&coords))
+    {
+        Ok(coords_bytes) => CoordsResult::success(coords_bytes),
+        Err(e) => CoordsResult::error(&e.to_string()),
     }
 }
 

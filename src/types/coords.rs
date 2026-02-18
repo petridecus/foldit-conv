@@ -237,6 +237,12 @@ pub struct ChainIdMapper {
 const CHAIN_CHARS: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~";
 
+impl Default for ChainIdMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChainIdMapper {
     pub fn new() -> Self {
         Self {

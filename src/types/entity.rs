@@ -170,7 +170,7 @@ impl MoleculeEntity {
         match self.molecule_type {
             MoleculeType::Protein => {
                 // Collect unique chain IDs
-                let mut chains: Vec<u8> = self.coords.chain_ids.iter().copied().collect();
+                let mut chains: Vec<u8> = self.coords.chain_ids.to_vec();
                 chains.sort_unstable();
                 chains.dedup();
                 if chains.len() == 1 {

@@ -56,19 +56,18 @@ pub fn pdb_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsError>
 fn sanitize_pdb(content: &str) -> String {
     content
         .lines()
-        .filter_map(|line| {
-            if line.starts_with("REMARK") {
+        .map(|line| {
+            if let Some(after) = line.strip_prefix("REMARK") {
                 // PDB spec: columns 8-10 should be a remark number.
                 // If there's no number, prefix one (0) so pdbtbx accepts it.
-                let after = &line[6..];
                 let trimmed = after.trim_start();
                 if trimmed.is_empty() || !trimmed.as_bytes()[0].is_ascii_digit() {
-                    Some(format!("REMARK   0 {}", trimmed))
+                    format!("REMARK   0 {}", trimmed)
                 } else {
-                    Some(line.to_string())
+                    line.to_string()
                 }
             } else {
-                Some(line.to_string())
+                line.to_string()
             }
         })
         .collect::<Vec<_>>()

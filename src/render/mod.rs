@@ -147,9 +147,9 @@ impl RenderCoords {
 
             let res_key = (chain_id, res_num);
 
-            let is_chain_break = last_chain_id.map_or(false, |c| c != chain_id);
-            let is_sequence_gap = last_res_num.map_or(false, |r| (res_num - r).abs() > 1);
-            let is_new_residue = current_res_key.map_or(true, |k| k != res_key);
+            let is_chain_break = last_chain_id.is_some_and(|c| c != chain_id);
+            let is_sequence_gap = last_res_num.is_some_and(|r| (res_num - r).abs() > 1);
+            let is_new_residue = current_res_key != Some(res_key);
 
             if is_new_residue && current_res_key.is_some() {
                 flush_residue(
@@ -180,8 +180,8 @@ impl RenderCoords {
                 "CA" => {
                     current_ca = Some(pos);
 
-                    if !residue_idx_map.contains_key(&res_key) {
-                        residue_idx_map.insert(res_key, next_residue_idx);
+                    if let std::collections::hash_map::Entry::Vacant(e) = residue_idx_map.entry(res_key) {
+                        e.insert(next_residue_idx);
                         next_residue_idx += 1;
                     }
                     if current_chain_id.is_none() {
@@ -211,7 +211,7 @@ impl RenderCoords {
 
                         atom_lookup.insert((residue_idx, atom_name.clone()), sidechain_idx);
 
-                        let hydrophobic = is_hydrophobic_fn.map_or(false, |f| f(res_name));
+                        let hydrophobic = is_hydrophobic_fn.is_some_and(|f| f(res_name));
                         sidechain_atoms.push(RenderSidechainAtom {
                             position: pos,
                             residue_idx,
@@ -443,10 +443,10 @@ pub fn extract_sequences(coords: &Coords) -> (String, Vec<(u8, String)>) {
         if atom_name == "CA" {
             let res_key = (chain_id, res_num);
             if last_res_key != Some(res_key) {
-                if current_chain_id.is_some() && current_chain_id != Some(chain_id) {
-                    if !current_chain_seq.is_empty() {
+                if let Some(cid) = current_chain_id {
+                    if cid != chain_id && !current_chain_seq.is_empty() {
                         chain_sequences.push((
-                            current_chain_id.unwrap(),
+                            cid,
                             std::mem::take(&mut current_chain_seq),
                         ));
                     }

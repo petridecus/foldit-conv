@@ -24,7 +24,7 @@ pub fn detect(ca_positions: &[Vec3]) -> Vec<SSType> {
             let d_i4 = (ca_positions[i] - ca_positions[i + 4]).length();
 
             // Helix: Cα(i)-Cα(i+3) ~ 5.0-5.5Å, Cα(i)-Cα(i+4) ~ 5.5-6.5Å
-            let is_helix = d_i3 >= 4.5 && d_i3 <= 6.0 && d_i4 >= 5.0 && d_i4 <= 7.0;
+            let is_helix = (4.5..=6.0).contains(&d_i3) && (5.0..=7.0).contains(&d_i4);
 
             if is_helix {
                 ss[i] = SSType::Helix;
@@ -37,7 +37,7 @@ pub fn detect(ca_positions: &[Vec3]) -> Vec<SSType> {
             let d_i2 = (ca_positions[i] - ca_positions[i + 2]).length();
 
             // Sheet: Extended, so Cα(i)-Cα(i+1) ~ 3.8Å and Cα(i)-Cα(i+2) ~ 6.5-7.5Å
-            let is_extended = d_i1 >= 3.5 && d_i1 <= 4.1 && d_i2 >= 6.0 && d_i2 <= 8.0;
+            let is_extended = (3.5..=4.1).contains(&d_i1) && (6.0..=8.0).contains(&d_i2);
 
             if is_extended {
                 ss[i] = SSType::Sheet;

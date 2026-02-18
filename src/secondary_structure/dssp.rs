@@ -54,14 +54,14 @@ pub fn detect(residues: &[BackboneResidue]) -> Vec<SSType> {
         let h = h_positions[i];
         let n_pos = residues[i].n;
 
-        for j in 0..n {
+        for (j, res_j) in residues.iter().enumerate() {
             if i == j || i == j + 1 || (j > 0 && i == j - 1) {
                 continue; // skip self and immediate neighbors
             }
 
             // Acceptor: CO of residue j
-            let c = residues[j].c;
-            let o = residues[j].o;
+            let c = res_j.c;
+            let o = res_j.o;
 
             let r_on = (o - n_pos).length();
             let r_ch = (c - h).length();
@@ -106,10 +106,8 @@ pub fn detect(residues: &[BackboneResidue]) -> Vec<SSType> {
                     } else {
                         i
                     };
-                    for k in start..=i + turn_size {
-                        if k < n {
-                            raw_ss[k] = SSType::Helix;
-                        }
+                    for ss_entry in raw_ss.iter_mut().take(n).skip(start).take(i + turn_size + 1 - start) {
+                        *ss_entry = SSType::Helix;
                     }
                 }
             } else {

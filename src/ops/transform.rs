@@ -34,8 +34,8 @@ pub fn extract_backbone_chains(coords: &Coords) -> Vec<Vec<Vec3>> {
         let res_num = coords.res_nums[i];
         let pos = Vec3::new(coords.atoms[i].x, coords.atoms[i].y, coords.atoms[i].z);
 
-        let is_chain_break = last_chain_id.map_or(false, |c| c != chain_id);
-        let is_sequence_gap = last_res_num.map_or(false, |r| (res_num - r).abs() > 1);
+        let is_chain_break = last_chain_id.is_some_and(|c| c != chain_id);
+        let is_sequence_gap = last_res_num.is_some_and(|r| (res_num - r).abs() > 1);
 
         if (is_chain_break || is_sequence_gap) && !current_chain.is_empty() {
             chains.push(std::mem::take(&mut current_chain));
@@ -544,8 +544,8 @@ fn svd_3x3(a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3], [[f32; 3]; 3]) {
     let mut ata = [[0.0f32; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            for k in 0..3 {
-                ata[i][j] += a[k][i] * a[k][j];
+            for row in &a {
+                ata[i][j] += row[i] * row[j];
             }
         }
     }
@@ -578,8 +578,8 @@ fn svd_3x3(a: [[f32; 3]; 3]) -> ([[f32; 3]; 3], [f32; 3], [[f32; 3]; 3]) {
 
 fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) {
     let mut v = [[0.0f32; 3]; 3];
-    for i in 0..3 {
-        v[i][i] = 1.0;
+    for (i, row) in v.iter_mut().enumerate() {
+        row[i] = 1.0;
     }
 
     const MAX_ITER: usize = 50;
@@ -587,10 +587,10 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
         let mut max_val = 0.0f32;
         let mut p = 0;
         let mut q = 1;
-        for i in 0..3 {
-            for j in (i + 1)..3 {
-                if a[i][j].abs() > max_val {
-                    max_val = a[i][j].abs();
+        for (i, row) in a.iter().enumerate() {
+            for (j, &val) in row.iter().enumerate().skip(i + 1) {
+                if val.abs() > max_val {
+                    max_val = val.abs();
                     p = i;
                     q = j;
                 }
@@ -627,11 +627,11 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
         }
         a = new_a;
 
-        for i in 0..3 {
-            let vip = v[i][p];
-            let viq = v[i][q];
-            v[i][p] = c * vip - s * viq;
-            v[i][q] = s * vip + c * viq;
+        for row in &mut v {
+            let vip = row[p];
+            let viq = row[q];
+            row[p] = c * vip - s * viq;
+            row[q] = s * vip + c * viq;
         }
     }
 
@@ -657,57 +657,39 @@ fn jacobi_eigendecomposition(mut a: [[f32; 3]; 3]) -> ([f32; 3], [[f32; 3]; 3]) 
 }
 
 fn orthonormalize(m: &mut [[f32; 3]; 3]) {
-    let mut norm = 0.0f32;
-    for i in 0..3 {
-        norm += m[i][0] * m[i][0];
-    }
+    let mut norm: f32 = m.iter().map(|row| row[0] * row[0]).sum();
     norm = norm.sqrt();
     if norm > 1e-10 {
-        for i in 0..3 {
-            m[i][0] /= norm;
+        for row in m.iter_mut() {
+            row[0] /= norm;
         }
     }
 
-    let mut dot = 0.0f32;
-    for i in 0..3 {
-        dot += m[i][1] * m[i][0];
+    let mut dot: f32 = m.iter().map(|row| row[1] * row[0]).sum();
+    for row in m.iter_mut() {
+        row[1] -= dot * row[0];
     }
-    for i in 0..3 {
-        m[i][1] -= dot * m[i][0];
-    }
-    norm = 0.0;
-    for i in 0..3 {
-        norm += m[i][1] * m[i][1];
-    }
+    norm = m.iter().map(|row| row[1] * row[1]).sum();
     norm = norm.sqrt();
     if norm > 1e-10 {
-        for i in 0..3 {
-            m[i][1] /= norm;
+        for row in m.iter_mut() {
+            row[1] /= norm;
         }
     }
 
-    dot = 0.0;
-    for i in 0..3 {
-        dot += m[i][2] * m[i][0];
+    dot = m.iter().map(|row| row[2] * row[0]).sum();
+    for row in m.iter_mut() {
+        row[2] -= dot * row[0];
     }
-    for i in 0..3 {
-        m[i][2] -= dot * m[i][0];
+    dot = m.iter().map(|row| row[2] * row[1]).sum();
+    for row in m.iter_mut() {
+        row[2] -= dot * row[1];
     }
-    dot = 0.0;
-    for i in 0..3 {
-        dot += m[i][2] * m[i][1];
-    }
-    for i in 0..3 {
-        m[i][2] -= dot * m[i][1];
-    }
-    norm = 0.0;
-    for i in 0..3 {
-        norm += m[i][2] * m[i][2];
-    }
+    norm = m.iter().map(|row| row[2] * row[2]).sum();
     norm = norm.sqrt();
     if norm > 1e-10 {
-        for i in 0..3 {
-            m[i][2] /= norm;
+        for row in m.iter_mut() {
+            row[2] /= norm;
         }
     }
 }
