@@ -11,7 +11,9 @@ use std::collections::{HashMap, HashSet};
 pub fn expected_heavy_atoms(res_name: &str) -> &'static [&'static str] {
     match res_name.trim() {
         "ALA" => &["N", "CA", "C", "O", "CB"],
-        "ARG" => &["N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2"],
+        "ARG" => &[
+            "N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2",
+        ],
         "ASN" => &["N", "CA", "C", "O", "CB", "CG", "OD1", "ND2"],
         "ASP" => &["N", "CA", "C", "O", "CB", "CG", "OD1", "OD2"],
         "CYS" => &["N", "CA", "C", "O", "CB", "SG"],
@@ -23,12 +25,18 @@ pub fn expected_heavy_atoms(res_name: &str) -> &'static [&'static str] {
         "LEU" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2"],
         "LYS" => &["N", "CA", "C", "O", "CB", "CG", "CD", "CE", "NZ"],
         "MET" => &["N", "CA", "C", "O", "CB", "CG", "SD", "CE"],
-        "PHE" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ"],
+        "PHE" => &[
+            "N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ",
+        ],
         "PRO" => &["N", "CA", "C", "O", "CB", "CG", "CD"],
         "SER" => &["N", "CA", "C", "O", "CB", "OG"],
         "THR" => &["N", "CA", "C", "O", "CB", "OG1", "CG2"],
-        "TRP" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1", "CE2", "CE3", "CZ2", "CZ3", "CH2"],
-        "TYR" => &["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "OH"],
+        "TRP" => &[
+            "N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1", "CE2", "CE3", "CZ2", "CZ3", "CH2",
+        ],
+        "TYR" => &[
+            "N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "OH",
+        ],
         "VAL" => &["N", "CA", "C", "O", "CB", "CG1", "CG2"],
         _ => &["N", "CA", "C", "O"],
     }
@@ -63,9 +71,7 @@ pub fn atoms_by_residue(coords: &Coords) -> Vec<ResidueAtoms> {
     }
 
     let mut residues: Vec<ResidueAtoms> = residue_map.into_values().collect();
-    residues.sort_by(|a, b| {
-        a.chain_id.cmp(&b.chain_id).then(a.res_num.cmp(&b.res_num))
-    });
+    residues.sort_by(|a, b| a.chain_id.cmp(&b.chain_id).then(a.res_num.cmp(&b.res_num)));
 
     residues
 }
@@ -88,12 +94,7 @@ pub fn validate_completeness(coords: &Coords) -> ValidationResult {
         let present: HashSet<String> = residue
             .atoms
             .iter()
-            .map(|a| {
-                std::str::from_utf8(a)
-                    .unwrap_or("")
-                    .trim()
-                    .to_string()
-            })
+            .map(|a| std::str::from_utf8(a).unwrap_or("").trim().to_string())
             .collect();
 
         let missing: Vec<String> = expected_set
@@ -138,12 +139,12 @@ pub fn completeness_report(coords: &Coords) -> String {
     let validation = validate_completeness(coords);
     let mut report = String::new();
 
-    report.push_str(&format!(
-        "COORDS Completeness Report\n{}\n",
-        "=".repeat(50)
-    ));
+    report.push_str(&format!("COORDS Completeness Report\n{}\n", "=".repeat(50)));
     report.push_str(&format!("Total residues: {}\n", validation.total_residues));
-    report.push_str(&format!("Incomplete residues: {}\n", validation.incomplete_residues));
+    report.push_str(&format!(
+        "Incomplete residues: {}\n",
+        validation.incomplete_residues
+    ));
     report.push_str(&format!(
         "Complete: {}\n\n",
         if validation.is_complete { "YES" } else { "NO" }
@@ -154,7 +155,9 @@ pub fn completeness_report(coords: &Coords) -> String {
         for (res_num, res_name, atoms) in &validation.missing_atoms {
             report.push_str(&format!(
                 "  Residue {} ({}): {}\n",
-                res_num, res_name, atoms.join(", ")
+                res_num,
+                res_name,
+                atoms.join(", ")
             ));
         }
         report.push('\n');
@@ -165,7 +168,9 @@ pub fn completeness_report(coords: &Coords) -> String {
         for (res_num, res_name, atoms) in &validation.extra_atoms {
             report.push_str(&format!(
                 "  Residue {} ({}): {}\n",
-                res_num, res_name, atoms.join(", ")
+                res_num,
+                res_name,
+                atoms.join(", ")
             ));
         }
     }

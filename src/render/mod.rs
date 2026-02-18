@@ -56,15 +56,17 @@ impl RenderCoords {
     }
 
     pub fn from_coords(coords: &Coords) -> Self {
-        Self::from_coords_internal::<fn(&str) -> bool, fn(&str) -> Option<Vec<(&'static str, &'static str)>>>(
-            coords, None, None, None
-        )
+        Self::from_coords_internal::<
+            fn(&str) -> bool,
+            fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
+        >(coords, None, None, None)
     }
 
     pub fn from_coords_with_bonds(coords: &Coords, bonds: &[(u32, u32)]) -> Self {
-        Self::from_coords_internal::<fn(&str) -> bool, fn(&str) -> Option<Vec<(&'static str, &'static str)>>>(
-            coords, Some(bonds), None, None
-        )
+        Self::from_coords_internal::<
+            fn(&str) -> bool,
+            fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
+        >(coords, Some(bonds), None, None)
     }
 
     fn from_coords_internal<F, G>(
@@ -93,7 +95,6 @@ impl RenderCoords {
         let mut last_chain_id: Option<u8> = None;
         let mut last_res_num: Option<i32> = None;
 
-
         let mut current_n: Option<Vec3> = None;
         let mut current_ca: Option<Vec3> = None;
         let mut current_c: Option<Vec3> = None;
@@ -103,31 +104,32 @@ impl RenderCoords {
         let mut residue_idx_map: HashMap<(u8, i32), u32> = HashMap::new();
         let mut next_residue_idx: u32 = 0;
 
-        let flush_residue = |current_n: &mut Option<Vec3>,
-                             current_ca: &mut Option<Vec3>,
-                             current_c: &mut Option<Vec3>,
-                             current_o: &mut Option<Vec3>,
-                             current_chain: &mut Vec<Vec3>,
-                             current_residues: &mut Vec<RenderBackboneResidue>| {
-            if let (Some(n), Some(ca), Some(c)) = (*current_n, *current_ca, *current_c) {
-                current_chain.push(n);
-                current_chain.push(ca);
-                current_chain.push(c);
+        let flush_residue =
+            |current_n: &mut Option<Vec3>,
+             current_ca: &mut Option<Vec3>,
+             current_c: &mut Option<Vec3>,
+             current_o: &mut Option<Vec3>,
+             current_chain: &mut Vec<Vec3>,
+             current_residues: &mut Vec<RenderBackboneResidue>| {
+                if let (Some(n), Some(ca), Some(c)) = (*current_n, *current_ca, *current_c) {
+                    current_chain.push(n);
+                    current_chain.push(ca);
+                    current_chain.push(c);
 
-                if let Some(o) = *current_o {
-                    current_residues.push(RenderBackboneResidue {
-                        n_pos: n,
-                        ca_pos: ca,
-                        c_pos: c,
-                        o_pos: o,
-                    });
+                    if let Some(o) = *current_o {
+                        current_residues.push(RenderBackboneResidue {
+                            n_pos: n,
+                            ca_pos: ca,
+                            c_pos: c,
+                            o_pos: o,
+                        });
+                    }
                 }
-            }
-            *current_n = None;
-            *current_ca = None;
-            *current_c = None;
-            *current_o = None;
-        };
+                *current_n = None;
+                *current_ca = None;
+                *current_c = None;
+                *current_o = None;
+            };
 
         for i in 0..coords.num_atoms {
             let atom_name = std::str::from_utf8(&coords.atom_names[i])
@@ -151,8 +153,12 @@ impl RenderCoords {
 
             if is_new_residue && current_res_key.is_some() {
                 flush_residue(
-                    &mut current_n, &mut current_ca, &mut current_c, &mut current_o,
-                    &mut current_chain, &mut current_residues,
+                    &mut current_n,
+                    &mut current_ca,
+                    &mut current_c,
+                    &mut current_o,
+                    &mut current_chain,
+                    &mut current_residues,
                 );
             }
 
@@ -170,7 +176,6 @@ impl RenderCoords {
             match atom_name.as_str() {
                 "N" => {
                     current_n = Some(pos);
-
                 }
                 "CA" => {
                     current_ca = Some(pos);
@@ -186,7 +191,6 @@ impl RenderCoords {
                 }
                 "C" => {
                     current_c = Some(pos);
-
                 }
                 "O" => current_o = Some(pos),
                 _ => {
@@ -200,7 +204,8 @@ impl RenderCoords {
 
                     if !is_hydrogen {
                         let sidechain_idx = sidechain_atoms.len() as u32;
-                        atom_index_map.insert((chain_id, res_num, atom_name.clone()), sidechain_idx);
+                        atom_index_map
+                            .insert((chain_id, res_num, atom_name.clone()), sidechain_idx);
 
                         let residue_idx = residue_idx_map.get(&res_key).copied().unwrap_or(0);
 
@@ -222,8 +227,12 @@ impl RenderCoords {
         }
 
         flush_residue(
-            &mut current_n, &mut current_ca, &mut current_c, &mut current_o,
-            &mut current_chain, &mut current_residues,
+            &mut current_n,
+            &mut current_ca,
+            &mut current_c,
+            &mut current_o,
+            &mut current_chain,
+            &mut current_residues,
         );
 
         if !current_chain.is_empty() {
@@ -280,7 +289,8 @@ impl RenderCoords {
         G: Fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
     {
         let mut bonds: Vec<(u32, u32)> = Vec::new();
-        let mut seen_residues: std::collections::HashSet<(u8, i32)> = std::collections::HashSet::new();
+        let mut seen_residues: std::collections::HashSet<(u8, i32)> =
+            std::collections::HashSet::new();
 
         for i in 0..coords.num_atoms {
             let atom_name = std::str::from_utf8(&coords.atom_names[i])
@@ -318,7 +328,10 @@ impl RenderCoords {
     }
 
     pub fn sidechain_hydrophobicity(&self) -> Vec<bool> {
-        self.sidechain_atoms.iter().map(|a| a.is_hydrophobic).collect()
+        self.sidechain_atoms
+            .iter()
+            .map(|a| a.is_hydrophobic)
+            .collect()
     }
 
     pub fn sidechain_residue_indices(&self) -> Vec<u32> {
@@ -326,7 +339,10 @@ impl RenderCoords {
     }
 
     pub fn sidechain_atom_names(&self) -> Vec<String> {
-        self.sidechain_atoms.iter().map(|a| a.atom_name.clone()).collect()
+        self.sidechain_atoms
+            .iter()
+            .map(|a| a.atom_name.clone())
+            .collect()
     }
 
     pub fn get_atom_position(&self, residue_idx: u32, atom_name: &str) -> Option<Vec3> {
@@ -429,7 +445,10 @@ pub fn extract_sequences(coords: &Coords) -> (String, Vec<(u8, String)>) {
             if last_res_key != Some(res_key) {
                 if current_chain_id.is_some() && current_chain_id != Some(chain_id) {
                     if !current_chain_seq.is_empty() {
-                        chain_sequences.push((current_chain_id.unwrap(), std::mem::take(&mut current_chain_seq)));
+                        chain_sequences.push((
+                            current_chain_id.unwrap(),
+                            std::mem::take(&mut current_chain_seq),
+                        ));
                     }
                 }
 
@@ -453,11 +472,26 @@ pub fn extract_sequences(coords: &Coords) -> (String, Vec<(u8, String)>) {
 
 fn three_to_one(three: &str) -> char {
     match three {
-        "ALA" => 'A', "CYS" => 'C', "ASP" => 'D', "GLU" => 'E',
-        "PHE" => 'F', "GLY" => 'G', "HIS" => 'H', "ILE" => 'I',
-        "LYS" => 'K', "LEU" => 'L', "MET" => 'M', "ASN" => 'N',
-        "PRO" => 'P', "GLN" => 'Q', "ARG" => 'R', "SER" => 'S',
-        "THR" => 'T', "VAL" => 'V', "TRP" => 'W', "TYR" => 'Y',
+        "ALA" => 'A',
+        "CYS" => 'C',
+        "ASP" => 'D',
+        "GLU" => 'E',
+        "PHE" => 'F',
+        "GLY" => 'G',
+        "HIS" => 'H',
+        "ILE" => 'I',
+        "LYS" => 'K',
+        "LEU" => 'L',
+        "MET" => 'M',
+        "ASN" => 'N',
+        "PRO" => 'P',
+        "GLN" => 'Q',
+        "ARG" => 'R',
+        "SER" => 'S',
+        "THR" => 'T',
+        "VAL" => 'V',
+        "TRP" => 'W',
+        "TYR" => 'Y',
         "MSE" => 'M',
         "HSD" | "HSE" | "HSP" => 'H',
         "CYX" => 'C',
@@ -474,11 +508,41 @@ mod tests {
         Coords {
             num_atoms: 5,
             atoms: vec![
-                CoordsAtom { x: 0.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 1.5, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 2.5, y: 1.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 2.5, y: 2.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 1.5, y: -1.5, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
+                CoordsAtom {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 1.5,
+                    y: 0.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 2.5,
+                    y: 1.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 2.5,
+                    y: 2.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 1.5,
+                    y: -1.5,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
             ],
             chain_ids: vec![b'A', b'A', b'A', b'A', b'A'],
             res_names: vec![*b"ALA", *b"ALA", *b"ALA", *b"ALA", *b"ALA"],
@@ -510,9 +574,18 @@ mod tests {
     fn test_atom_lookup() {
         let coords = make_test_coords();
         let render = RenderCoords::from_coords(&coords);
-        assert_eq!(render.get_atom_position(0, "CA"), Some(Vec3::new(1.5, 0.0, 0.0)));
-        assert_eq!(render.get_atom_position(0, "N"), Some(Vec3::new(0.0, 0.0, 0.0)));
-        assert_eq!(render.get_atom_position(0, "CB"), Some(Vec3::new(1.5, -1.5, 0.0)));
+        assert_eq!(
+            render.get_atom_position(0, "CA"),
+            Some(Vec3::new(1.5, 0.0, 0.0))
+        );
+        assert_eq!(
+            render.get_atom_position(0, "N"),
+            Some(Vec3::new(0.0, 0.0, 0.0))
+        );
+        assert_eq!(
+            render.get_atom_position(0, "CB"),
+            Some(Vec3::new(1.5, -1.5, 0.0))
+        );
         assert_eq!(render.get_atom_position(0, "CG"), None);
         assert_eq!(render.get_atom_position(1, "CA"), None);
     }

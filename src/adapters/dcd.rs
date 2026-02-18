@@ -220,7 +220,9 @@ fn parse_header(r: &mut impl Read) -> io::Result<DcdHeader> {
             let start = 4 + i * 80;
             let end = start + 80;
             if end <= rec2.len() {
-                let line = String::from_utf8_lossy(&rec2[start..end]).trim().to_string();
+                let line = String::from_utf8_lossy(&rec2[start..end])
+                    .trim()
+                    .to_string();
                 if !line.is_empty() {
                     lines.push(line);
                 }

@@ -2,8 +2,8 @@
 
 use pyo3::prelude::*;
 
-use crate::types::coords::{deserialize, serialize};
 use crate::adapters::pdb;
+use crate::types::coords::{deserialize, serialize};
 
 #[pyfunction]
 pub fn deserialize_coords_py(coords_bytes: Vec<u8>) -> PyResult<Vec<u8>> {

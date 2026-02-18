@@ -6,8 +6,8 @@
 //! - Kabsch alignment
 
 use crate::types::coords::{
-    deserialize, serialize, Coords, CoordsAtom, CoordsError, Element,
-    ASSEMBLY_MAGIC, deserialize_assembly, serialize_assembly,
+    deserialize, deserialize_assembly, serialize, serialize_assembly, Coords, CoordsAtom,
+    CoordsError, Element, ASSEMBLY_MAGIC,
 };
 use glam::{Mat3, Vec3};
 
@@ -106,7 +106,10 @@ pub fn get_ca_position_from_chains(chains: &[Vec<Vec3>], residue_idx: usize) -> 
 
 /// Get all backbone atom positions (N, CA, C) for a residue by index.
 /// Returns None if residue_idx is out of bounds.
-pub fn get_backbone_atoms_from_chains(chains: &[Vec<Vec3>], residue_idx: usize) -> Option<(Vec3, Vec3, Vec3)> {
+pub fn get_backbone_atoms_from_chains(
+    chains: &[Vec<Vec3>],
+    residue_idx: usize,
+) -> Option<(Vec3, Vec3, Vec3)> {
     let mut current_idx = 0;
     for chain in chains {
         let residues_in_chain = chain.len() / 3;
@@ -205,7 +208,9 @@ pub fn get_closest_atom_with_name(
     // Check sidechain atoms for this residue
     for (i, &res_idx) in sidechain_residue_indices.iter().enumerate() {
         if res_idx as usize == residue_idx {
-            if let (Some(&pos), Some(name)) = (sidechain_positions.get(i), sidechain_atom_names.get(i)) {
+            if let (Some(&pos), Some(name)) =
+                (sidechain_positions.get(i), sidechain_atom_names.get(i))
+            {
                 let dist = pos.distance_squared(reference_point);
                 if closest.is_none() || dist < closest.as_ref().unwrap().2 {
                     closest = Some((pos, name.clone(), dist));
@@ -300,9 +305,8 @@ pub fn filter_residues(coords: &Coords, predicate: impl Fn(&[u8; 3]) -> bool) ->
 
 /// Standard amino acid residue names
 pub const PROTEIN_RESIDUES: &[&str] = &[
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-    // Non-standard but protein-like
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU", "LYS", "MET",
+    "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL", // Non-standard but protein-like
     "MSE", "SEC", "PYL",
 ];
 
@@ -466,10 +470,7 @@ pub fn transform_coords_with_scale(
 }
 
 /// Align COORDS to match reference CA positions using Kabsch algorithm.
-pub fn align_to_reference(
-    coords: &mut Coords,
-    reference_ca: &[Vec3],
-) -> Result<(), CoordsError> {
+pub fn align_to_reference(coords: &mut Coords, reference_ca: &[Vec3]) -> Result<(), CoordsError> {
     let predicted_ca = extract_ca_positions(coords);
 
     if predicted_ca.len() != reference_ca.len() {
@@ -814,7 +815,12 @@ pub fn set_atom_position(coords: &mut Coords, index: usize, pos: Vec3) {
 }
 
 /// Get position of a specific atom by residue number, chain ID, and atom name.
-pub fn get_atom_by_name(coords: &Coords, res_num: i32, chain_id: u8, atom_name: &str) -> Option<Vec3> {
+pub fn get_atom_by_name(
+    coords: &Coords,
+    res_num: i32,
+    chain_id: u8,
+    atom_name: &str,
+) -> Option<Vec3> {
     for i in 0..coords.num_atoms {
         if coords.res_nums[i] == res_num && coords.chain_ids[i] == chain_id {
             let name = std::str::from_utf8(&coords.atom_names[i])
@@ -846,11 +852,10 @@ pub fn build_ca_position_map(coords: &Coords) -> std::collections::HashMap<(u8, 
             .trim();
         if name == "CA" {
             let key = (coords.chain_ids[i], coords.res_nums[i]);
-            map.insert(key, Vec3::new(
-                coords.atoms[i].x,
-                coords.atoms[i].y,
-                coords.atoms[i].z,
-            ));
+            map.insert(
+                key,
+                Vec3::new(coords.atoms[i].x, coords.atoms[i].y, coords.atoms[i].z),
+            );
         }
     }
     map
@@ -865,8 +870,20 @@ mod tests {
         let start = Coords {
             num_atoms: 2,
             atoms: vec![
-                CoordsAtom { x: 0.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 1.0, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
+                CoordsAtom {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
             ],
             chain_ids: vec![b'A', b'A'],
             res_names: vec![*b"ALA", *b"ALA"],
@@ -878,8 +895,20 @@ mod tests {
         let end = Coords {
             num_atoms: 2,
             atoms: vec![
-                CoordsAtom { x: 0.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
-                CoordsAtom { x: 1.0, y: 10.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 },
+                CoordsAtom {
+                    x: 0.0,
+                    y: 10.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
+                CoordsAtom {
+                    x: 1.0,
+                    y: 10.0,
+                    z: 0.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                },
             ],
             chain_ids: vec![b'A', b'A'],
             res_names: vec![*b"ALA", *b"ALA"],

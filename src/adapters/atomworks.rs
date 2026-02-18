@@ -37,12 +37,12 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::ops::bond_inference::{infer_bonds, BondOrder, DEFAULT_TOLERANCE};
 use crate::types::coords::{
     deserialize, deserialize_assembly, serialize_assembly, ChainIdMapper, Coords, CoordsAtom,
     Element,
 };
 use crate::types::entity::{split_into_entities, MoleculeEntity, MoleculeType};
-use crate::ops::bond_inference::{infer_bonds, BondOrder, DEFAULT_TOLERANCE};
 
 // ============================================================================
 // Molecule type ↔ AtomWorks chain type mapping
@@ -58,11 +58,11 @@ use crate::ops::bond_inference::{infer_bonds, BondOrder, DEFAULT_TOLERANCE};
 /// We map to these from `MoleculeType` when building annotations.
 fn molecule_type_to_chain_type_id(mt: MoleculeType) -> u8 {
     match mt {
-        MoleculeType::Protein => 6,  // POLYPEPTIDE_L (default; D-peptides need explicit flag)
+        MoleculeType::Protein => 6, // POLYPEPTIDE_L (default; D-peptides need explicit flag)
         MoleculeType::DNA => 3,
         MoleculeType::RNA => 7,
-        MoleculeType::Ligand => 8,   // NON_POLYMER
-        MoleculeType::Ion => 8,      // NON_POLYMER
+        MoleculeType::Ligand => 8, // NON_POLYMER
+        MoleculeType::Ion => 8,    // NON_POLYMER
         MoleculeType::Water => 9,
         MoleculeType::Lipid => 8,    // NON_POLYMER
         MoleculeType::Cofactor => 8, // NON_POLYMER
@@ -72,13 +72,13 @@ fn molecule_type_to_chain_type_id(mt: MoleculeType) -> u8 {
 
 fn chain_type_id_to_molecule_type(ct: u8) -> MoleculeType {
     match ct {
-        3 | 4 => MoleculeType::DNA,        // DNA, DNA_RNA_HYBRID
-        5 | 6 => MoleculeType::Protein,     // POLYPEPTIDE_D, POLYPEPTIDE_L
+        3 | 4 => MoleculeType::DNA,     // DNA, DNA_RNA_HYBRID
+        5 | 6 => MoleculeType::Protein, // POLYPEPTIDE_D, POLYPEPTIDE_L
         7 => MoleculeType::RNA,
         9 => MoleculeType::Water,
-        8 => MoleculeType::Ligand,          // NON_POLYMER (refined later by residue name)
-        10 => MoleculeType::Ligand,         // BRANCHED (glycans etc.)
-        _ => MoleculeType::Ligand,          // Conservative default
+        8 => MoleculeType::Ligand, // NON_POLYMER (refined later by residue name)
+        10 => MoleculeType::Ligand, // BRANCHED (glycans etc.)
+        _ => MoleculeType::Ligand, // Conservative default
     }
 }
 
@@ -119,10 +119,7 @@ fn mol_type_str_to_molecule_type(s: &str) -> MoleculeType {
 /// - AtomWorks annotations: `entity_id` (per-atom int), `mol_type` (per-atom str),
 ///   `chain_type` (per-atom int matching `atomworks.enums.ChainType`)
 /// - `BondList` populated from entity bond data or distance inference
-fn entities_to_atom_array_impl(
-    py: Python,
-    entities: &[MoleculeEntity],
-) -> PyResult<Py<PyAny>> {
+fn entities_to_atom_array_impl(py: Python, entities: &[MoleculeEntity]) -> PyResult<Py<PyAny>> {
     // Count total atoms across all entities
     let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
     if total_atoms == 0 {
@@ -220,11 +217,7 @@ fn entities_to_atom_array_impl(
                     BondOrder::Triple => 3,
                     BondOrder::Aromatic => 4,
                 };
-                all_bonds.push((
-                    bond.atom_a + atom_offset,
-                    bond.atom_b + atom_offset,
-                    bt,
-                ));
+                all_bonds.push((bond.atom_a + atom_offset, bond.atom_b + atom_offset, bt));
             }
         }
 
@@ -402,7 +395,11 @@ pub fn atom_array_to_entities(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec
     let atom_array = atom_array.bind(py);
 
     // Get array length
-    let num_atoms: usize = atom_array.getattr("coord")?.getattr("shape")?.get_item(0)?.extract()?;
+    let num_atoms: usize = atom_array
+        .getattr("coord")?
+        .getattr("shape")?
+        .get_item(0)?
+        .extract()?;
     if num_atoms == 0 {
         return serialize_assembly(&[])
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()));
@@ -610,10 +607,7 @@ pub fn atom_array_to_entity_vec(
 /// is available: it gets CCD bond lookup, leaving group removal, charge
 /// correction, occupancy handling, and all other AtomWorks cleaning steps.
 #[pyfunction]
-pub fn parse_file_to_entities(
-    py: Python,
-    file_path: String,
-) -> PyResult<Vec<u8>> {
+pub fn parse_file_to_entities(py: Python, file_path: String) -> PyResult<Vec<u8>> {
     let aw_parser = py.import("atomworks.io.parser")?;
     let result = aw_parser.call_method1("parse", (&file_path,))?;
 
@@ -631,10 +625,7 @@ pub fn parse_file_to_entities(
 /// - `"chain_info"`: dict of chain_id → { "sequence": str, ... }
 /// - `"assemblies"`: dict of assembly_id → ASSEM01 bytes for each bio assembly
 #[pyfunction]
-pub fn parse_file_full(
-    py: Python,
-    file_path: String,
-) -> PyResult<Py<PyAny>> {
+pub fn parse_file_full(py: Python, file_path: String) -> PyResult<Py<PyAny>> {
     let aw_parser = py.import("atomworks.io.parser")?;
     let result = aw_parser.call_method1("parse", (&file_path,))?;
 
@@ -714,7 +705,11 @@ mod tests {
         for mt in types {
             let ct = molecule_type_to_chain_type_id(mt);
             let back = chain_type_id_to_molecule_type(ct);
-            assert_eq!(mt, back, "Round-trip failed for {:?} -> ct={} -> {:?}", mt, ct, back);
+            assert_eq!(
+                mt, back,
+                "Round-trip failed for {:?} -> ct={} -> {:?}",
+                mt, ct, back
+            );
         }
     }
 

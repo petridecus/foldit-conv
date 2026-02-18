@@ -19,7 +19,27 @@ use thiserror::Error;
 /// ligands, ions, and waters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Element {
-    H, C, N, O, S, P, Se, Fe, Zn, Mg, Ca, Na, Cl, K, Mn, Co, Ni, Cu, Br, I, F,
+    H,
+    C,
+    N,
+    O,
+    S,
+    P,
+    Se,
+    Fe,
+    Zn,
+    Mg,
+    Ca,
+    Na,
+    Cl,
+    K,
+    Mn,
+    Co,
+    Ni,
+    Cu,
+    Br,
+    I,
+    F,
     Unknown,
 }
 
@@ -77,40 +97,40 @@ impl Element {
     /// Standard CPK coloring (Corey-Pauling-Koltun).
     pub fn cpk_color(&self) -> [f32; 3] {
         match self {
-            Element::H  => [1.0, 1.0, 1.0],       // White
-            Element::C  => [0.4, 0.4, 0.4],       // Dark gray
-            Element::N  => [0.2, 0.2, 1.0],       // Blue
-            Element::O  => [1.0, 0.2, 0.2],       // Red
-            Element::S  => [1.0, 0.85, 0.2],      // Yellow
-            Element::P  => [1.0, 0.5, 0.0],       // Orange
-            Element::Se => [1.0, 0.63, 0.0],      // Orange-yellow
-            Element::Fe => [0.56, 0.25, 0.08],    // Rust brown
-            Element::Zn => [0.49, 0.50, 0.69],    // Slate blue
-            Element::Mg => [0.0, 0.55, 0.0],      // Dark green
-            Element::Ca => [0.0, 0.55, 0.0],      // Dark green
-            Element::Na => [0.67, 0.36, 0.95],    // Purple
-            Element::Cl => [0.12, 0.94, 0.12],    // Green
-            Element::K  => [0.56, 0.25, 0.83],    // Violet
-            Element::Mn => [0.61, 0.48, 0.78],    // Purple-gray
-            Element::Co => [0.94, 0.56, 0.63],    // Pink
-            Element::Ni => [0.31, 0.82, 0.31],    // Green
-            Element::Cu => [0.78, 0.50, 0.20],    // Copper
-            Element::Br => [0.65, 0.16, 0.16],    // Dark red
-            Element::I  => [0.58, 0.0, 0.58],     // Purple
-            Element::F  => [0.56, 0.88, 0.31],    // Yellow-green
-            Element::Unknown => [0.7, 0.7, 0.7],  // Light gray
+            Element::H => [1.0, 1.0, 1.0],       // White
+            Element::C => [0.4, 0.4, 0.4],       // Dark gray
+            Element::N => [0.2, 0.2, 1.0],       // Blue
+            Element::O => [1.0, 0.2, 0.2],       // Red
+            Element::S => [1.0, 0.85, 0.2],      // Yellow
+            Element::P => [1.0, 0.5, 0.0],       // Orange
+            Element::Se => [1.0, 0.63, 0.0],     // Orange-yellow
+            Element::Fe => [0.56, 0.25, 0.08],   // Rust brown
+            Element::Zn => [0.49, 0.50, 0.69],   // Slate blue
+            Element::Mg => [0.0, 0.55, 0.0],     // Dark green
+            Element::Ca => [0.0, 0.55, 0.0],     // Dark green
+            Element::Na => [0.67, 0.36, 0.95],   // Purple
+            Element::Cl => [0.12, 0.94, 0.12],   // Green
+            Element::K => [0.56, 0.25, 0.83],    // Violet
+            Element::Mn => [0.61, 0.48, 0.78],   // Purple-gray
+            Element::Co => [0.94, 0.56, 0.63],   // Pink
+            Element::Ni => [0.31, 0.82, 0.31],   // Green
+            Element::Cu => [0.78, 0.50, 0.20],   // Copper
+            Element::Br => [0.65, 0.16, 0.16],   // Dark red
+            Element::I => [0.58, 0.0, 0.58],     // Purple
+            Element::F => [0.56, 0.88, 0.31],    // Yellow-green
+            Element::Unknown => [0.7, 0.7, 0.7], // Light gray
         }
     }
 
     /// Covalent radius in angstroms (Cambridge CSD values).
     pub fn covalent_radius(&self) -> f32 {
         match self {
-            Element::H  => 0.31,
-            Element::C  => 0.76,
-            Element::N  => 0.71,
-            Element::O  => 0.66,
-            Element::S  => 1.05,
-            Element::P  => 1.07,
+            Element::H => 0.31,
+            Element::C => 0.76,
+            Element::N => 0.71,
+            Element::O => 0.66,
+            Element::S => 1.05,
+            Element::P => 1.07,
             Element::Se => 1.20,
             Element::Fe => 1.32,
             Element::Zn => 1.22,
@@ -118,14 +138,14 @@ impl Element {
             Element::Ca => 1.76,
             Element::Na => 1.66,
             Element::Cl => 1.02,
-            Element::K  => 2.03,
+            Element::K => 2.03,
             Element::Mn => 1.39,
             Element::Co => 1.26,
             Element::Ni => 1.24,
             Element::Cu => 1.32,
             Element::Br => 1.20,
-            Element::I  => 1.39,
-            Element::F  => 0.57,
+            Element::I => 1.39,
+            Element::F => 0.57,
             Element::Unknown => 0.77,
         }
     }
@@ -133,12 +153,12 @@ impl Element {
     /// Van der Waals radius in angstroms.
     pub fn vdw_radius(&self) -> f32 {
         match self {
-            Element::H  => 1.20,
-            Element::C  => 1.70,
-            Element::N  => 1.55,
-            Element::O  => 1.52,
-            Element::S  => 1.80,
-            Element::P  => 1.80,
+            Element::H => 1.20,
+            Element::C => 1.70,
+            Element::N => 1.55,
+            Element::O => 1.52,
+            Element::S => 1.80,
+            Element::P => 1.80,
             Element::Se => 1.90,
             Element::Fe => 2.00,
             Element::Zn => 1.39,
@@ -146,14 +166,14 @@ impl Element {
             Element::Ca => 2.31,
             Element::Na => 2.27,
             Element::Cl => 1.75,
-            Element::K  => 2.75,
+            Element::K => 2.75,
             Element::Mn => 2.00,
             Element::Co => 2.00,
             Element::Ni => 1.63,
             Element::Cu => 1.40,
             Element::Br => 1.85,
-            Element::I  => 1.98,
-            Element::F  => 1.47,
+            Element::I => 1.98,
+            Element::F => 1.47,
             Element::Unknown => 1.70,
         }
     }
@@ -161,12 +181,12 @@ impl Element {
     /// Two-character symbol (padded with space if single char).
     pub fn symbol(&self) -> &'static str {
         match self {
-            Element::H  => "H",
-            Element::C  => "C",
-            Element::N  => "N",
-            Element::O  => "O",
-            Element::S  => "S",
-            Element::P  => "P",
+            Element::H => "H",
+            Element::C => "C",
+            Element::N => "N",
+            Element::O => "O",
+            Element::S => "S",
+            Element::P => "P",
             Element::Se => "Se",
             Element::Fe => "Fe",
             Element::Zn => "Zn",
@@ -174,14 +194,14 @@ impl Element {
             Element::Ca => "Ca",
             Element::Na => "Na",
             Element::Cl => "Cl",
-            Element::K  => "K",
+            Element::K => "K",
             Element::Mn => "Mn",
             Element::Co => "Co",
             Element::Ni => "Ni",
             Element::Cu => "Cu",
             Element::Br => "Br",
-            Element::I  => "I",
-            Element::F  => "F",
+            Element::I => "I",
+            Element::F => "F",
             Element::Unknown => "X",
         }
     }
@@ -214,7 +234,8 @@ pub struct ChainIdMapper {
 
 /// Printable chain ID characters in conventional order: A-Z, a-z, 0-9, then
 /// remaining printable ASCII. Covers up to 94 unique chains.
-const CHAIN_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~";
+const CHAIN_CHARS: &[u8] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+,-./:;<=>?@[]^_`{|}~";
 
 impl ChainIdMapper {
     pub fn new() -> Self {
@@ -339,7 +360,11 @@ pub fn deserialize(coords_bytes: &[u8]) -> Result<Coords, CoordsError> {
     ) as usize;
     *cursor = &cursor[4..];
 
-    let per_atom = if has_elements { 12 + 1 + 3 + 4 + 4 + 2 } else { 12 + 1 + 3 + 4 + 4 };
+    let per_atom = if has_elements {
+        12 + 1 + 3 + 4 + 4 + 2
+    } else {
+        12 + 1 + 3 + 4 + 4
+    };
     if cursor.len() < num_atoms * per_atom {
         return Err(CoordsError::InvalidFormat(
             "Data too short for declared number of atoms".to_string(),
@@ -354,15 +379,18 @@ pub fn deserialize(coords_bytes: &[u8]) -> Result<Coords, CoordsError> {
     let mut elements = Vec::with_capacity(num_atoms);
 
     for _ in 0..num_atoms {
-        let x = f32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
-            CoordsError::SerializationError("Invalid x coordinate".to_string())
-        })?);
-        let y = f32::from_be_bytes(cursor[4..8].try_into().map_err(|_| {
-            CoordsError::SerializationError("Invalid y coordinate".to_string())
-        })?);
-        let z = f32::from_be_bytes(cursor[8..12].try_into().map_err(|_| {
-            CoordsError::SerializationError("Invalid z coordinate".to_string())
-        })?);
+        let x =
+            f32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid x coordinate".to_string())
+            })?);
+        let y =
+            f32::from_be_bytes(cursor[4..8].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid y coordinate".to_string())
+            })?);
+        let z =
+            f32::from_be_bytes(cursor[8..12].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid z coordinate".to_string())
+            })?);
 
         atoms.push(CoordsAtom {
             x,
@@ -382,9 +410,10 @@ pub fn deserialize(coords_bytes: &[u8]) -> Result<Coords, CoordsError> {
         res_names.push(res_name);
         *cursor = &cursor[3..];
 
-        let res_num = i32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
-            CoordsError::SerializationError("Invalid residue number".to_string())
-        })?);
+        let res_num =
+            i32::from_be_bytes(cursor[0..4].try_into().map_err(|_| {
+                CoordsError::SerializationError("Invalid residue number".to_string())
+            })?);
         res_nums.push(res_num);
         *cursor = &cursor[4..];
 
@@ -395,7 +424,10 @@ pub fn deserialize(coords_bytes: &[u8]) -> Result<Coords, CoordsError> {
 
         if has_elements {
             let sym_bytes = &cursor[0..2];
-            let sym_str = std::str::from_utf8(sym_bytes).unwrap_or("").trim_matches('\0').trim();
+            let sym_str = std::str::from_utf8(sym_bytes)
+                .unwrap_or("")
+                .trim_matches('\0')
+                .trim();
             elements.push(Element::from_symbol(sym_str));
             *cursor = &cursor[2..];
         } else {
@@ -551,7 +583,8 @@ pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsE
     }
 
     let entity_count = u32::from_be_bytes(
-        bytes[8..12].try_into()
+        bytes[8..12]
+            .try_into()
             .map_err(|_| CoordsError::InvalidFormat("Invalid entity count".to_string()))?,
     ) as usize;
 
@@ -566,15 +599,13 @@ pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsE
     let mut entity_headers: Vec<(MoleculeType, usize)> = Vec::with_capacity(entity_count);
     let mut offset = 12;
     for _ in 0..entity_count {
-        let mol_type = MoleculeType::from_wire_byte(bytes[offset])
-            .ok_or_else(|| CoordsError::InvalidFormat(
-                format!("Unknown molecule type byte: {}", bytes[offset]),
-            ))?;
+        let mol_type = MoleculeType::from_wire_byte(bytes[offset]).ok_or_else(|| {
+            CoordsError::InvalidFormat(format!("Unknown molecule type byte: {}", bytes[offset]))
+        })?;
         offset += 1;
-        let atom_count = u32::from_be_bytes(
-            bytes[offset..offset + 4].try_into()
-                .map_err(|_| CoordsError::InvalidFormat("Invalid atom count in entity header".to_string()))?,
-        ) as usize;
+        let atom_count = u32::from_be_bytes(bytes[offset..offset + 4].try_into().map_err(|_| {
+            CoordsError::InvalidFormat("Invalid atom count in entity header".to_string())
+        })?) as usize;
         offset += 4;
         entity_headers.push((mol_type, atom_count));
     }
@@ -608,7 +639,13 @@ pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsE
             let z = f32::from_be_bytes(cursor[8..12].try_into().map_err(|_| {
                 CoordsError::SerializationError("Invalid z coordinate".to_string())
             })?);
-            atoms.push(CoordsAtom { x, y, z, occupancy: 1.0, b_factor: 0.0 });
+            atoms.push(CoordsAtom {
+                x,
+                y,
+                z,
+                occupancy: 1.0,
+                b_factor: 0.0,
+            });
             cursor = &cursor[12..];
 
             chain_ids.push(cursor[0]);
@@ -630,7 +667,10 @@ pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsE
             atom_names.push(an);
             cursor = &cursor[4..];
 
-            let sym_str = std::str::from_utf8(&cursor[0..2]).unwrap_or("").trim_matches('\0').trim();
+            let sym_str = std::str::from_utf8(&cursor[0..2])
+                .unwrap_or("")
+                .trim_matches('\0')
+                .trim();
             elements.push(Element::from_symbol(sym_str));
             cursor = &cursor[2..];
         }

@@ -6,22 +6,41 @@ pub mod density;
 pub mod entity;
 
 // Re-export commonly used items
-pub use coords::{
-    AtomMetadata, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element,
-    ResidueAtoms, ValidationResult,
-    // Binary serialization
-    deserialize, serialize, atom_count, COORDS_MAGIC,
-    ASSEMBLY_MAGIC, serialize_assembly, deserialize_assembly,
-};
-pub use entity::{
-    classify_residue, extract_by_type, merge_entities, split_into_entities,
-    MoleculeEntity, MoleculeType,
-};
 pub use assembly::{
-    CombinedSession, prepare_combined_session, split_combined_result,
-    CombinedAssembly, prepare_combined_assembly,
+    assembly_bytes,
+    ca_positions,
+    prepare_combined_assembly,
+    prepare_combined_session,
     // Free functions (replace Assembly struct methods)
-    protein_coords, protein_coords_bytes, assembly_bytes, ca_positions, residue_count,
-    update_protein_entities, update_entities_from_backend,
+    protein_coords,
+    protein_coords_bytes,
+    residue_count,
+    split_combined_result,
+    update_entities_from_backend,
+    update_protein_entities,
+    CombinedAssembly,
+    CombinedSession,
 };
-pub use density::{DensityMap, DensityError};
+pub use coords::{
+    atom_count,
+    // Binary serialization
+    deserialize,
+    deserialize_assembly,
+    serialize,
+    serialize_assembly,
+    AtomMetadata,
+    ChainIdMapper,
+    Coords,
+    CoordsAtom,
+    CoordsError,
+    Element,
+    ResidueAtoms,
+    ValidationResult,
+    ASSEMBLY_MAGIC,
+    COORDS_MAGIC,
+};
+pub use density::{DensityError, DensityMap};
+pub use entity::{
+    classify_residue, extract_by_type, merge_entities, split_into_entities, MoleculeEntity,
+    MoleculeType,
+};

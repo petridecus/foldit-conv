@@ -180,12 +180,9 @@ pub fn mrc_to_density(bytes: &[u8]) -> Result<DensityMap, DensityError> {
         // Fast path: file order matches XYZ — just reshape
         // File order: section(Z) -> row(Y) -> col(X), which is Z-major = [nz, ny, nx]
         // We want [nx, ny, nz], so we need to permute
-        let arr = Array3::from_shape_vec((ns, nr, nc), flat).map_err(|e| {
-            DensityError::InvalidFormat(format!("array reshape failed: {e}"))
-        })?;
-        arr.permuted_axes([2, 1, 0])
-            .as_standard_layout()
-            .to_owned()
+        let arr = Array3::from_shape_vec((ns, nr, nc), flat)
+            .map_err(|e| DensityError::InvalidFormat(format!("array reshape failed: {e}")))?;
+        arr.permuted_axes([2, 1, 0]).as_standard_layout().to_owned()
     } else {
         // General case: scatter file voxels into spatial positions
         let mut arr = Array3::<f32>::zeros((nx, ny, nz));
@@ -247,21 +244,11 @@ fn detect_endianness(header: &[u8]) -> Result<bool, DensityError> {
         0x11 => Ok(false), // big-endian
         _ => {
             // Fallback: try LE, check if MODE is valid
-            let mode_le = i32::from_le_bytes([
-                header[12],
-                header[13],
-                header[14],
-                header[15],
-            ]);
+            let mode_le = i32::from_le_bytes([header[12], header[13], header[14], header[15]]);
             if matches!(mode_le, 0 | 1 | 2 | 6) {
                 Ok(true)
             } else {
-                let mode_be = i32::from_be_bytes([
-                    header[12],
-                    header[13],
-                    header[14],
-                    header[15],
-                ]);
+                let mode_be = i32::from_be_bytes([header[12], header[13], header[14], header[15]]);
                 if matches!(mode_be, 0 | 1 | 2 | 6) {
                     Ok(false)
                 } else {
@@ -591,8 +578,8 @@ mod tests {
     #[test]
     fn mode_0_i8() {
         let mut header = make_test_mrc(2, 1, 1, 0, 1, 2, 3, &[]);
-        header.push(50u8);           // 50 as i8
-        header.push((-30i8) as u8);  // -30 as i8
+        header.push(50u8); // 50 as i8
+        header.push((-30i8) as u8); // -30 as i8
 
         let map = mrc_to_density(&header).unwrap();
         assert_eq!(map.data[[0, 0, 0]], 50.0);

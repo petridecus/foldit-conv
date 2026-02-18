@@ -6,9 +6,9 @@
 //! derives `Coords` from entities.  Now every operation is a free function
 //! that takes `&[MoleculeEntity]` or `&mut Vec<MoleculeEntity>`.
 
-use super::coords::{Coords, CoordsError, Element, serialize, deserialize, serialize_assembly};
-use super::entity::{MoleculeEntity, MoleculeType, split_into_entities, merge_entities};
-use crate::ops::transform::{protein_only, extract_ca_positions};
+use super::coords::{deserialize, serialize, serialize_assembly, Coords, CoordsError, Element};
+use super::entity::{merge_entities, split_into_entities, MoleculeEntity, MoleculeType};
+use crate::ops::transform::{extract_ca_positions, protein_only};
 use glam::Vec3;
 use std::collections::HashMap;
 
@@ -49,10 +49,7 @@ pub fn residue_count(entities: &[MoleculeEntity]) -> usize {
 /// Replace protein entity coords (keeps non-protein entities).
 /// Splits the incoming combined protein coords by chain ID so each
 /// entity only receives its own chain's atoms, avoiding duplication.
-pub fn update_protein_entities(
-    entities: &mut Vec<MoleculeEntity>,
-    protein: Coords,
-) {
+pub fn update_protein_entities(entities: &mut Vec<MoleculeEntity>, protein: Coords) {
     // Re-split the incoming protein coords into per-chain entities
     let new_protein = split_into_entities(&protein);
 
@@ -77,37 +74,46 @@ pub fn update_protein_entities(
 /// Update from a backend export (e.g., Rosetta COORDS output after wiggle/shake).
 /// Replaces entities whose molecule types appear in the export, preserves entities
 /// whose types don't appear (i.e., types the backend skipped/couldn't load).
-pub fn update_entities_from_backend(
-    entities: &mut Vec<MoleculeEntity>,
-    backend_coords: Coords,
-) {
+pub fn update_entities_from_backend(entities: &mut Vec<MoleculeEntity>, backend_coords: Coords) {
     use std::collections::HashSet;
 
-    eprintln!("[assembly::update_entities_from_backend] incoming: {} atoms", backend_coords.num_atoms);
+    eprintln!(
+        "[assembly::update_entities_from_backend] incoming: {} atoms",
+        backend_coords.num_atoms
+    );
 
     // Split the backend export into entities to determine which types are present
     let new_entities = split_into_entities(&backend_coords);
 
     eprintln!("[assembly::update_entities_from_backend] new entities:");
     for e in &new_entities {
-        eprintln!("  {:?}: {} atoms (chain {:?})",
-            e.molecule_type, e.coords.num_atoms,
-            e.coords.chain_ids.first().map(|&c| c as char));
+        eprintln!(
+            "  {:?}: {} atoms (chain {:?})",
+            e.molecule_type,
+            e.coords.num_atoms,
+            e.coords.chain_ids.first().map(|&c| c as char)
+        );
     }
 
     // Collect molecule types present in the export
-    let exported_types: HashSet<MoleculeType> = new_entities.iter()
-        .map(|e| e.molecule_type)
-        .collect();
+    let exported_types: HashSet<MoleculeType> =
+        new_entities.iter().map(|e| e.molecule_type).collect();
 
-    eprintln!("[assembly::update_entities_from_backend] exported types: {:?}", exported_types);
+    eprintln!(
+        "[assembly::update_entities_from_backend] exported types: {:?}",
+        exported_types
+    );
 
     // Keep entities whose type was NOT exported (backend skipped them)
-    let mut kept: Vec<MoleculeEntity> = entities.drain(..)
+    let mut kept: Vec<MoleculeEntity> = entities
+        .drain(..)
         .filter(|e| !exported_types.contains(&e.molecule_type))
         .collect();
 
-    eprintln!("[assembly::update_entities_from_backend] kept {} entities from original", kept.len());
+    eprintln!(
+        "[assembly::update_entities_from_backend] kept {} entities from original",
+        kept.len()
+    );
 
     // Combine: exported entities first, then kept entities
     let mut updated = new_entities;
@@ -121,8 +127,11 @@ pub fn update_entities_from_backend(
     *entities = updated;
 
     let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
-    eprintln!("[assembly::update_entities_from_backend] final: {} entities, {} total atoms",
-        entities.len(), total_atoms);
+    eprintln!(
+        "[assembly::update_entities_from_backend] final: {} entities, {} total atoms",
+        entities.len(),
+        total_atoms
+    );
 }
 
 // ============================================================================
@@ -170,7 +179,9 @@ pub fn prepare_combined_session(groups: &[&[MoleculeEntity]]) -> Option<Combined
         let residue_count: usize = {
             let mut seen = std::collections::HashSet::new();
             for i in 0..protein.num_atoms {
-                let atom_name = std::str::from_utf8(&protein.atom_names[i]).unwrap_or("").trim();
+                let atom_name = std::str::from_utf8(&protein.atom_names[i])
+                    .unwrap_or("")
+                    .trim();
                 if atom_name == "CA" {
                     seen.insert((protein.chain_ids[i], protein.res_nums[i]));
                 }
@@ -184,7 +195,11 @@ pub fn prepare_combined_session(groups: &[&[MoleculeEntity]]) -> Option<Combined
             let orig_chain = protein.chain_ids[i];
             let mapped_chain = *chain_id_map.entry(orig_chain).or_insert_with(|| {
                 let id = next_chain_id;
-                next_chain_id = if next_chain_id == b'Z' { b'a' } else { next_chain_id + 1 };
+                next_chain_id = if next_chain_id == b'Z' {
+                    b'a'
+                } else {
+                    next_chain_id + 1
+                };
                 id
             });
 
@@ -315,7 +330,11 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
             for &cid in &entity.coords.chain_ids {
                 chain_id_map.entry(cid).or_insert_with(|| {
                     let id = next_chain_id;
-                    next_chain_id = if next_chain_id == b'Z' { b'a' } else { next_chain_id + 1 };
+                    next_chain_id = if next_chain_id == b'Z' {
+                        b'a'
+                    } else {
+                        next_chain_id + 1
+                    };
                     id
                 });
             }
@@ -351,7 +370,9 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
         // Clone and remap entities
         for entity in *entity_slice {
             let c = &entity.coords;
-            let remapped_chain_ids: Vec<u8> = c.chain_ids.iter()
+            let remapped_chain_ids: Vec<u8> = c
+                .chain_ids
+                .iter()
                 .map(|&cid| *chain_id_map.get(&cid).unwrap_or(&cid))
                 .collect();
 
@@ -375,12 +396,14 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
         return None;
     }
 
-    serialize_assembly(&all_entities).ok().map(|bytes| CombinedAssembly {
-        bytes,
-        chain_ids: chain_ids_per_group,
-        residue_ranges,
-        total_residues: global_residue_offset,
-    })
+    serialize_assembly(&all_entities)
+        .ok()
+        .map(|bytes| CombinedAssembly {
+            bytes,
+            chain_ids: chain_ids_per_group,
+            residue_ranges,
+            total_residues: global_residue_offset,
+        })
 }
 
 #[cfg(test)]
@@ -390,18 +413,28 @@ mod tests {
     use crate::types::entity::MoleculeType;
 
     fn make_atom(x: f32) -> CoordsAtom {
-        CoordsAtom { x, y: 0.0, z: 0.0, occupancy: 1.0, b_factor: 0.0 }
+        CoordsAtom {
+            x,
+            y: 0.0,
+            z: 0.0,
+            occupancy: 1.0,
+            b_factor: 0.0,
+        }
     }
 
     fn res_name(s: &str) -> [u8; 3] {
         let mut name = [b' '; 3];
-        for (i, b) in s.bytes().take(3).enumerate() { name[i] = b; }
+        for (i, b) in s.bytes().take(3).enumerate() {
+            name[i] = b;
+        }
         name
     }
 
     fn atom_name(s: &str) -> [u8; 4] {
         let mut name = [b' '; 4];
-        for (i, b) in s.bytes().take(4).enumerate() { name[i] = b; }
+        for (i, b) in s.bytes().take(4).enumerate() {
+            name[i] = b;
+        }
         name
     }
 
@@ -414,14 +447,22 @@ mod tests {
             atoms: (0..7).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'B', b'B', b'C'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("GLY"), res_name("GLY"), res_name("GLY"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
                 res_name("HOH"),
             ],
             res_nums: vec![1, 1, 1, 1, 1, 1, 100],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
                 atom_name("O"),
             ],
             elements: vec![Element::Unknown; 7],
@@ -438,13 +479,21 @@ mod tests {
             atoms: (10..16).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'B', b'B'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("GLY"), res_name("GLY"), res_name("GLY"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
             ],
             res_nums: vec![1, 1, 1, 1, 1, 1],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
             ],
             elements: vec![Element::Unknown; 6],
         };
@@ -457,7 +506,8 @@ mod tests {
         assert_eq!(entities.len(), 3); // chain A, chain B, water
 
         // Protein entities should have 3 atoms each, not 6
-        let protein_entities: Vec<_> = entities.iter()
+        let protein_entities: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
         assert_eq!(protein_entities.len(), 2);
@@ -475,13 +525,21 @@ mod tests {
             atoms: (20..26).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'B', b'B'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("GLY"), res_name("GLY"), res_name("GLY"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
             ],
             res_nums: vec![1, 1, 1, 1, 1, 1],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
             ],
             elements: vec![Element::Unknown; 6],
         };
@@ -499,13 +557,19 @@ mod tests {
             atoms: (0..5).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'C'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("ZN"), res_name("HOH"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ZN"),
+                res_name("HOH"),
             ],
             res_nums: vec![1, 1, 1, 100, 200],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("ZN"), atom_name("O"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("ZN"),
+                atom_name("O"),
             ],
             elements: vec![Element::N, Element::C, Element::C, Element::Zn, Element::O],
         };
@@ -515,15 +579,24 @@ mod tests {
 
         let backend_export = Coords {
             num_atoms: 4,
-            atoms: vec![make_atom(10.0), make_atom(11.0), make_atom(12.0), make_atom(50.0)],
+            atoms: vec![
+                make_atom(10.0),
+                make_atom(11.0),
+                make_atom(12.0),
+                make_atom(50.0),
+            ],
             chain_ids: vec![b'A', b'A', b'A', b'B'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
                 res_name("ZN"),
             ],
             res_nums: vec![1, 1, 1, 2],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
                 atom_name("ZN"),
             ],
             elements: vec![Element::N, Element::C, Element::C, Element::Zn],
@@ -534,20 +607,23 @@ mod tests {
         let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
         assert_eq!(total, 5);
 
-        let water: Vec<_> = entities.iter()
+        let water: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Water)
             .collect();
         assert_eq!(water.len(), 1);
         assert_eq!(water[0].coords.num_atoms, 1);
         assert!((water[0].coords.atoms[0].x - 4.0).abs() < 1e-6);
 
-        let protein: Vec<_> = entities.iter()
+        let protein: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
         assert_eq!(protein.len(), 1);
         assert!((protein[0].coords.atoms[0].x - 10.0).abs() < 1e-6);
 
-        let ion: Vec<_> = entities.iter()
+        let ion: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Ion)
             .collect();
         assert_eq!(ion.len(), 1);
@@ -562,13 +638,19 @@ mod tests {
             atoms: (0..5).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'C'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("ATP"), res_name("HOH"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ATP"),
+                res_name("HOH"),
             ],
             res_nums: vec![1, 1, 1, 100, 200],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("C1"), atom_name("O"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("C1"),
+                atom_name("O"),
             ],
             elements: vec![Element::Unknown; 5],
         };
@@ -591,18 +673,21 @@ mod tests {
         assert_eq!(total, 5);
         assert_eq!(entities.len(), 3);
 
-        let protein: Vec<_> = entities.iter()
+        let protein: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
         assert!((protein[0].coords.atoms[0].x - 20.0).abs() < 1e-6);
 
-        let cofactor: Vec<_> = entities.iter()
+        let cofactor: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Cofactor)
             .collect();
         assert_eq!(cofactor.len(), 1);
         assert!((cofactor[0].coords.atoms[0].x - 3.0).abs() < 1e-6);
 
-        let water: Vec<_> = entities.iter()
+        let water: Vec<_> = entities
+            .iter()
             .filter(|e| e.molecule_type == MoleculeType::Water)
             .collect();
         assert_eq!(water.len(), 1);
@@ -615,18 +700,27 @@ mod tests {
         let coords = Coords {
             num_atoms: 5,
             atoms: vec![
-                make_atom(1.0), make_atom(2.0), make_atom(3.0),
-                make_atom(10.0), make_atom(20.0),
+                make_atom(1.0),
+                make_atom(2.0),
+                make_atom(3.0),
+                make_atom(10.0),
+                make_atom(20.0),
             ],
             chain_ids: vec![b'A', b'A', b'A', b'B', b'C'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("ATP"), res_name("ZN"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ATP"),
+                res_name("ZN"),
             ],
             res_nums: vec![1, 1, 1, 1, 1],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("C1"), atom_name("ZN"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("C1"),
+                atom_name("ZN"),
             ],
             elements: vec![Element::N, Element::C, Element::C, Element::C, Element::Zn],
         };
@@ -645,10 +739,14 @@ mod tests {
             assert_eq!(orig.coords.num_atoms, rt.coords.num_atoms);
         }
 
-        let orig_protein: Vec<_> = entities.iter()
-            .filter(|e| e.molecule_type == MoleculeType::Protein).collect();
-        let rt_protein: Vec<_> = roundtripped.iter()
-            .filter(|e| e.molecule_type == MoleculeType::Protein).collect();
+        let orig_protein: Vec<_> = entities
+            .iter()
+            .filter(|e| e.molecule_type == MoleculeType::Protein)
+            .collect();
+        let rt_protein: Vec<_> = roundtripped
+            .iter()
+            .filter(|e| e.molecule_type == MoleculeType::Protein)
+            .collect();
         assert_eq!(orig_protein.len(), rt_protein.len());
         for (o, r) in orig_protein.iter().zip(rt_protein.iter()) {
             for i in 0..o.coords.num_atoms {
@@ -708,7 +806,7 @@ mod tests {
 
     #[test]
     fn test_assembly_bytes_empty_entities() {
-        use crate::types::coords::{serialize_assembly, deserialize_assembly};
+        use crate::types::coords::{deserialize_assembly, serialize_assembly};
 
         let entities: Vec<MoleculeEntity> = Vec::new();
         let bytes = serialize_assembly(&entities).unwrap();
@@ -725,7 +823,13 @@ mod tests {
             molecule_type: MoleculeType::Protein,
             coords: Coords {
                 num_atoms: 1,
-                atoms: vec![CoordsAtom { x: 1.0, y: 2.0, z: 3.0, occupancy: 1.0, b_factor: 0.0 }],
+                atoms: vec![CoordsAtom {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                    occupancy: 1.0,
+                    b_factor: 0.0,
+                }],
                 chain_ids: vec![b'A'],
                 res_names: vec![res_name("ALA")],
                 res_nums: vec![1],
@@ -754,12 +858,16 @@ mod tests {
             atoms: (0..4).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'A'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
                 res_name("ZN"),
             ],
             res_nums: vec![1, 1, 1, 100],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
                 atom_name("ZN"),
             ],
             elements: vec![Element::N, Element::C, Element::C, Element::Zn],

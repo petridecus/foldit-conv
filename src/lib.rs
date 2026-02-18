@@ -47,7 +47,7 @@ pub mod coords {
     };
 
     // Density
-    pub use crate::types::density::{DensityMap, DensityError};
+    pub use crate::types::density::{DensityError, DensityMap};
 
     // GPU
     pub use crate::render::gpu;
@@ -89,8 +89,7 @@ pub mod coords {
     // Python bindings
     #[cfg(feature = "python")]
     pub use crate::python::{
-        coords_to_atom_array, coords_to_pdb, deserialize_coords_py, mmcif_to_coords,
-        pdb_to_coords,
+        coords_to_atom_array, coords_to_pdb, deserialize_coords_py, mmcif_to_coords, pdb_to_coords,
     };
 }
 
@@ -106,14 +105,38 @@ fn foldit_conv(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python::coords_to_pdb, m)?)?;
     m.add_function(wrap_pyfunction!(python::deserialize_coords_py, m)?)?;
     // AtomArray / AtomArrayPlus converters (entity-aware, preserves molecule types and bonds)
-    m.add_function(wrap_pyfunction!(adapters::atomworks::entities_to_atom_array, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::entities_to_atom_array_plus, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::atom_array_to_entities, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::coords_to_atom_array, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::coords_to_atom_array_plus, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::atom_array_to_coords, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::entities_to_atom_array_parsed, m)?)?;
-    m.add_function(wrap_pyfunction!(adapters::atomworks::parse_file_to_entities, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::entities_to_atom_array,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::entities_to_atom_array_plus,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::atom_array_to_entities,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::coords_to_atom_array,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::coords_to_atom_array_plus,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::atom_array_to_coords,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::entities_to_atom_array_parsed,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        adapters::atomworks::parse_file_to_entities,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(adapters::atomworks::parse_file_full, m)?)?;
 
     Ok(())

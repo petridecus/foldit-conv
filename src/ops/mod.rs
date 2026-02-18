@@ -5,6 +5,7 @@ pub mod transform;
 pub mod validation;
 
 // Re-export commonly used items
+pub use bond_inference::{infer_bonds, BondOrder, InferredBond, DEFAULT_TOLERANCE};
 pub use transform::{
     align_coords_bytes, align_to_reference, backbone_only, build_ca_position_map, centroid,
     extract_backbone_chains, extract_ca_from_chains, extract_ca_positions, filter_atoms,
@@ -18,4 +19,3 @@ pub use validation::{
     atom_counts, atoms_by_residue, backbone_atoms, completeness_report, expected_heavy_atoms,
     has_complete_backbone, validate_completeness, AtomCounts,
 };
-pub use bond_inference::{infer_bonds, BondOrder, InferredBond, DEFAULT_TOLERANCE};

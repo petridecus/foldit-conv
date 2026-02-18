@@ -159,20 +159,13 @@ impl TryFrom<&Block> for CoordinateData {
             .ok_or(ExtractionError::MissingCategory("_atom_site".into()))?;
 
         // Optional columns — collect into Vecs for indexed access
-        let elements: Option<Vec<_>> = block
-            .column("_atom_site.type_symbol")
-            .map(|c| c.collect());
+        let elements: Option<Vec<_>> = block.column("_atom_site.type_symbol").map(|c| c.collect());
         let bfactors: Option<Vec<_>> = block
             .column("_atom_site.B_iso_or_equiv")
             .map(|c| c.collect());
-        let occupancies: Option<Vec<_>> =
-            block.column("_atom_site.occupancy").map(|c| c.collect());
-        let seq_ids: Option<Vec<_>> = block
-            .column("_atom_site.label_seq_id")
-            .map(|c| c.collect());
-        let groups: Option<Vec<_>> = block
-            .column("_atom_site.group_PDB")
-            .map(|c| c.collect());
+        let occupancies: Option<Vec<_>> = block.column("_atom_site.occupancy").map(|c| c.collect());
+        let seq_ids: Option<Vec<_>> = block.column("_atom_site.label_seq_id").map(|c| c.collect());
+        let groups: Option<Vec<_>> = block.column("_atom_site.group_PDB").map(|c| c.collect());
 
         let mut atoms = Vec::with_capacity(cols.nrows());
         for (i, row) in cols.iter().enumerate() {
@@ -186,7 +179,10 @@ impl TryFrom<&Block> for CoordinateData {
                 label: row[0].as_str().unwrap_or("").to_string(),
                 residue: row[1].as_str().unwrap_or("").to_string(),
                 chain: row[2].as_str().unwrap_or("").to_string(),
-                seq_id: seq_ids.as_ref().and_then(|v| v.get(i)).and_then(|v| v.as_i32()),
+                seq_id: seq_ids
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .and_then(|v| v.as_i32()),
                 x: require_f64(row[3], "_atom_site.Cartn_x", i)?,
                 y: require_f64(row[4], "_atom_site.Cartn_y", i)?,
                 z: require_f64(row[5], "_atom_site.Cartn_z", i)?,
@@ -225,30 +221,18 @@ impl TryFrom<&Block> for ReflectionData {
             .ok_or_else(|| ExtractionError::MissingTag("_cell.length_*".into()))?;
 
         let cols = block
-            .columns(&[
-                "_refln.index_h",
-                "_refln.index_k",
-                "_refln.index_l",
-            ])
+            .columns(&["_refln.index_h", "_refln.index_k", "_refln.index_l"])
             .ok_or(ExtractionError::MissingCategory("_refln".into()))?;
 
         // Optional columns
-        let f_meas: Option<Vec<_>> = block
-            .column("_refln.F_meas_au")
-            .map(|c| c.collect());
-        let sigma: Option<Vec<_>> = block
-            .column("_refln.F_meas_sigma_au")
-            .map(|c| c.collect());
+        let f_meas: Option<Vec<_>> = block.column("_refln.F_meas_au").map(|c| c.collect());
+        let sigma: Option<Vec<_>> = block.column("_refln.F_meas_sigma_au").map(|c| c.collect());
         let f_calc: Option<Vec<_>> = block
             .column("_refln.F_calc_au")
             .or_else(|| block.column("_refln.F_calc"))
             .map(|c| c.collect());
-        let phase: Option<Vec<_>> = block
-            .column("_refln.phase_calc")
-            .map(|c| c.collect());
-        let status: Option<Vec<_>> = block
-            .column("_refln.status")
-            .map(|c| c.collect());
+        let phase: Option<Vec<_>> = block.column("_refln.phase_calc").map(|c| c.collect());
+        let status: Option<Vec<_>> = block.column("_refln.status").map(|c| c.collect());
 
         let mut reflections = Vec::with_capacity(cols.nrows());
         for (i, row) in cols.iter().enumerate() {
@@ -256,10 +240,22 @@ impl TryFrom<&Block> for ReflectionData {
                 h: require_i32(row[0], "_refln.index_h", i)?,
                 k: require_i32(row[1], "_refln.index_k", i)?,
                 l: require_i32(row[2], "_refln.index_l", i)?,
-                f_meas: f_meas.as_ref().and_then(|v| v.get(i)).and_then(|v| v.as_f64()),
-                sigma_f_meas: sigma.as_ref().and_then(|v| v.get(i)).and_then(|v| v.as_f64()),
-                f_calc: f_calc.as_ref().and_then(|v| v.get(i)).and_then(|v| v.as_f64()),
-                phase_calc: phase.as_ref().and_then(|v| v.get(i)).and_then(|v| v.as_f64()),
+                f_meas: f_meas
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .and_then(|v| v.as_f64()),
+                sigma_f_meas: sigma
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .and_then(|v| v.as_f64()),
+                f_calc: f_calc
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .and_then(|v| v.as_f64()),
+                phase_calc: phase
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .and_then(|v| v.as_f64()),
                 status: status
                     .as_ref()
                     .and_then(|v| v.get(i))
@@ -458,9 +454,9 @@ CA ALA A 1.0 2.0 3.0
         assert_eq!(coords.atoms.len(), 1);
         assert_eq!(coords.atoms[0].label, "CA");
         assert_eq!(coords.atoms[0].group, "ATOM"); // default
-        assert_eq!(coords.atoms[0].element, "");   // absent
+        assert_eq!(coords.atoms[0].element, ""); // absent
         assert!((coords.atoms[0].occupancy - 1.0).abs() < 1e-6); // default
-        assert!((coords.atoms[0].b_factor - 0.0).abs() < 1e-6);  // default
+        assert!((coords.atoms[0].b_factor - 0.0).abs() < 1e-6); // default
         assert!(coords.atoms[0].seq_id.is_none());
         assert!(coords.cell.is_none());
         assert!(coords.spacegroup.is_none());

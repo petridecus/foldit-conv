@@ -244,5 +244,4 @@ mod tests {
         let result = detect(&[]);
         assert!(result.is_empty());
     }
-
 }

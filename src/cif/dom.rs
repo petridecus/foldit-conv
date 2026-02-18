@@ -83,9 +83,7 @@ impl Loop {
 
     /// Find the column index for a tag (case-insensitive).
     pub fn column_index(&self, tag: &str) -> Option<usize> {
-        self.tags
-            .iter()
-            .position(|t| t.eq_ignore_ascii_case(tag))
+        self.tags.iter().position(|t| t.eq_ignore_ascii_case(tag))
     }
 }
 

@@ -16,6 +16,5 @@ pub use pdb::{
     coords_to_pdb as coords_bytes_to_pdb, mmcif_file_to_coords, mmcif_file_to_entities,
     mmcif_str_to_coords, mmcif_str_to_entities, mmcif_to_coords as mmcif_to_coords_internal,
     pdb_file_to_coords, pdb_file_to_entities, pdb_str_to_coords, pdb_str_to_entities,
-    pdb_to_coords as pdb_to_coords_internal, structure_file_to_coords,
-    structure_file_to_entities,
+    pdb_to_coords as pdb_to_coords_internal, structure_file_to_coords, structure_file_to_entities,
 };

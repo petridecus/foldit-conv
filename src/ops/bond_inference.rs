@@ -91,7 +91,9 @@ mod tests {
 
     fn make_atom(x: f32, y: f32, z: f32) -> CoordsAtom {
         CoordsAtom {
-            x, y, z,
+            x,
+            y,
+            z,
             occupancy: 1.0,
             b_factor: 0.0,
         }

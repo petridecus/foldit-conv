@@ -7,8 +7,8 @@
 //! - `split_into_entities()` — split flat `Coords` into per-entity groups
 //! - `merge_entities()` — recombine entities back into flat `Coords`
 
-use crate::ops::transform::PROTEIN_RESIDUES;
 use super::coords::{Coords, Element};
+use crate::ops::transform::PROTEIN_RESIDUES;
 use std::collections::{BTreeMap, HashMap};
 
 /// Classification of molecule types found in structural biology files.
@@ -144,7 +144,10 @@ fn ndb_base_color(res_name: &str) -> Option<[f32; 3]> {
 }
 
 fn is_purine(res_name: &str) -> bool {
-    matches!(res_name, "DA" | "DG" | "DI" | "A" | "G" | "ADE" | "GUA" | "I" | "RAD" | "RGU")
+    matches!(
+        res_name,
+        "DA" | "DG" | "DI" | "A" | "G" | "ADE" | "GUA" | "I" | "RAD" | "RGU"
+    )
 }
 
 impl MoleculeEntity {
@@ -335,7 +338,11 @@ impl MoleculeEntity {
                     .iter()
                     .filter_map(|name| atom_map.get(*name).copied())
                     .collect();
-                if pent.len() == 5 { pent } else { Vec::new() }
+                if pent.len() == 5 {
+                    pent
+                } else {
+                    Vec::new()
+                }
             } else {
                 Vec::new()
             };
@@ -354,7 +361,8 @@ impl MoleculeEntity {
         if skipped_partial > 0 {
             eprintln!(
                 "[base_rings] {} rings extracted, {} residues skipped (missing ring atoms)",
-                rings.len(), skipped_partial
+                rings.len(),
+                skipped_partial
             );
         }
 
@@ -383,7 +391,9 @@ const DNA_RESIDUES: &[&str] = &["DA", "DC", "DG", "DT", "DU", "DI", "THY"];
 /// Three-letter variants (ADE, CYT, GUA, URA) are legacy PDB conventions
 /// and also used by Rosetta for DNA exports (acceptable: both use NA renderer).
 /// RAD/RCY/RGU are Rosetta internal names for RNA returned by the C++ backend.
-const RNA_RESIDUES: &[&str] = &["A", "C", "G", "U", "ADE", "CYT", "GUA", "URA", "I", "RAD", "RCY", "RGU"];
+const RNA_RESIDUES: &[&str] = &[
+    "A", "C", "G", "U", "ADE", "CYT", "GUA", "URA", "I", "RAD", "RCY", "RGU",
+];
 
 /// Water residue names.
 const WATER_RESIDUES: &[&str] = &[
@@ -394,8 +404,8 @@ const WATER_RESIDUES: &[&str] = &[
 
 /// Known ion residue names. These are single-atom residues with well-known names.
 const ION_RESIDUES: &[&str] = &[
-    "ZN", "MG", "NA", "CL", "FE", "MN", "CO", "NI", "CU", "K", "CA", "BR", "I", "F", "LI",
-    "CD", "SR", "BA", "CS", "RB", "PB", "HG", "PT", "AU", "AG",
+    "ZN", "MG", "NA", "CL", "FE", "MN", "CO", "NI", "CU", "K", "CA", "BR", "I", "F", "LI", "CD",
+    "SR", "BA", "CS", "RB", "PB", "HG", "PT", "AU", "AG",
 ];
 
 /// Known lipid residue 3-char truncated names.
@@ -405,16 +415,11 @@ const LIPID_RESIDUES: &[&str] = &[
     // Phosphatidylcholines (DPPC, POPC, DOPC, DMPC, DSPC, DLPC)
     "DPP", "POP", "DOP", "DMP", "DSP", "DLP",
     // Phosphatidylethanolamines (DPPE, POPE, DOPE)
-    "PPE", "DPE",
-    // Phosphatidylglycerols (DPPG, POPG, DOPG)
-    "PPG", "DPG",
-    // Phosphatidylserines (DPPS, POPS, DOPS)
-    "PPS", "DPS",
-    // Cholesterol variants
-    "CHO", "CHL",
-    // Sphingomyelin, ceramide
-    "SPH", "CER",
-    // CHARMM-GUI lipid residue names (full 3-letter)
+    "PPE", "DPE", // Phosphatidylglycerols (DPPG, POPG, DOPG)
+    "PPG", "DPG", // Phosphatidylserines (DPPS, POPS, DOPS)
+    "PPS", "DPS", // Cholesterol variants
+    "CHO", "CHL", // Sphingomyelin, ceramide
+    "SPH", "CER", // CHARMM-GUI lipid residue names (full 3-letter)
     "PAL", "OLE", "STE", "MYR", "LAU",
     // PDB crystallographic lipid codes (thylakoid/membrane lipids)
     "LHG", // dipalmitoyl phosphatidylglycerol
@@ -430,13 +435,10 @@ const LIPID_RESIDUES: &[&str] = &[
 /// Covers porphyrins, quinones, nucleotide cofactors, and iron-sulfur clusters.
 const COFACTOR_RESIDUES: &[&str] = &[
     // Porphyrins / chlorins
-    "HEM", "HEC", "HEA", "HEB", "CLA", "CHL", "PHO", "BCR", "BCB",
-    // Quinones
-    "PL9", "PLQ", "UQ1", "UQ2", "MQ7",
-    // Nucleotide cofactors
-    "NAD", "NAP", "NAI", "NDP", "FAD", "FMN",
-    "ATP", "ADP", "AMP", "ANP", "GTP", "GDP", "GMP", "GNP",
-    // Other
+    "HEM", "HEC", "HEA", "HEB", "CLA", "CHL", "PHO", "BCR", "BCB", // Quinones
+    "PL9", "PLQ", "UQ1", "UQ2", "MQ7", // Nucleotide cofactors
+    "NAD", "NAP", "NAI", "NDP", "FAD", "FMN", "ATP", "ADP", "AMP", "ANP", "GTP", "GDP", "GMP",
+    "GNP", // Other
     "SAM", "SAH", "COA", "ACO", "PLP", "PMP", "TPP", "TDP", "BTN", "BIO", "H4B", "BH4",
     // Fe-S clusters
     "SF4", "FES", "F3S",
@@ -445,12 +447,9 @@ const COFACTOR_RESIDUES: &[&str] = &[
 /// Known solvent / crystallization artifact residue names (exact match).
 const SOLVENT_RESIDUES: &[&str] = &[
     // Polyols / PEGs
-    "GOL", "EDO", "PEG", "1PE", "P6G", "PG4", "PGE",
-    // Salts / buffers
-    "SO4", "SUL", "PO4", "ACT", "ACE", "CIT", "FMT",
-    // Buffers
-    "TRS", "MES", "EPE", "IMD",
-    // Cryoprotectants
+    "GOL", "EDO", "PEG", "1PE", "P6G", "PG4", "PGE", // Salts / buffers
+    "SO4", "SUL", "PO4", "ACT", "ACE", "CIT", "FMT", // Buffers
+    "TRS", "MES", "EPE", "IMD", // Cryoprotectants
     "MPD", "DMS", "BME", "IPA", "EOH",
 ];
 
@@ -621,7 +620,13 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
                 res_names.push(coords.res_names[idx]);
                 res_nums.push(coords.res_nums[idx]);
                 atom_names.push(coords.atom_names[idx]);
-                elements.push(coords.elements.get(idx).copied().unwrap_or(Element::Unknown));
+                elements.push(
+                    coords
+                        .elements
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(Element::Unknown),
+                );
             }
 
             MoleculeEntity {
@@ -780,13 +785,21 @@ mod tests {
             atoms: (0..6).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A'; 6],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("ALA"),
-                res_name("GLY"), res_name("GLY"), res_name("GLY"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
             ],
             res_nums: vec![1, 1, 1, 2, 2, 2],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("C"),
-                atom_name("N"), atom_name("CA"), atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
             ],
             elements: vec![Element::Unknown; 6],
         };
@@ -804,13 +817,19 @@ mod tests {
             atoms: (0..5).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'A', b'B', b'C'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"), res_name("HOH"),
-                res_name("ATP"), res_name("HOH"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("HOH"),
+                res_name("ATP"),
+                res_name("HOH"),
             ],
             res_nums: vec![1, 1, 100, 1, 200],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"), atom_name("O"),
-                atom_name("C1"), atom_name("O"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("O"),
+                atom_name("C1"),
+                atom_name("O"),
             ],
             elements: vec![Element::Unknown; 5],
         };
@@ -819,14 +838,23 @@ mod tests {
         // Protein(A), Water, Cofactor(ATP) = 3 entities
         assert_eq!(entities.len(), 3);
 
-        let protein = entities.iter().find(|e| e.molecule_type == MoleculeType::Protein).unwrap();
+        let protein = entities
+            .iter()
+            .find(|e| e.molecule_type == MoleculeType::Protein)
+            .unwrap();
         assert_eq!(protein.coords.num_atoms, 2);
 
-        let water = entities.iter().find(|e| e.molecule_type == MoleculeType::Water).unwrap();
+        let water = entities
+            .iter()
+            .find(|e| e.molecule_type == MoleculeType::Water)
+            .unwrap();
         assert_eq!(water.coords.num_atoms, 2);
 
         // ATP is now classified as Cofactor
-        let cofactor = entities.iter().find(|e| e.molecule_type == MoleculeType::Cofactor).unwrap();
+        let cofactor = entities
+            .iter()
+            .find(|e| e.molecule_type == MoleculeType::Cofactor)
+            .unwrap();
         assert_eq!(cofactor.coords.num_atoms, 1);
     }
 
@@ -837,13 +865,17 @@ mod tests {
             atoms: (0..4).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'B', b'B'],
             res_names: vec![
-                res_name("ALA"), res_name("ALA"),
-                res_name("HOH"), res_name("HOH"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("HOH"),
+                res_name("HOH"),
             ],
             res_nums: vec![1, 1, 100, 101],
             atom_names: vec![
-                atom_name("N"), atom_name("CA"),
-                atom_name("O"), atom_name("O"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("O"),
+                atom_name("O"),
             ],
             elements: vec![Element::Unknown; 4],
         };
@@ -904,13 +936,17 @@ mod tests {
             atoms: (0..4).map(|i| make_atom(i as f32)).collect(),
             chain_ids: vec![b'A', b'A', b'D', b'D'],
             res_names: vec![
-                res_name("CLA"), res_name("CLA"),
-                res_name("CLA"), res_name("CLA"),
+                res_name("CLA"),
+                res_name("CLA"),
+                res_name("CLA"),
+                res_name("CLA"),
             ],
             res_nums: vec![1, 1, 2, 2],
             atom_names: vec![
-                atom_name("MG"), atom_name("NA"),
-                atom_name("MG"), atom_name("NA"),
+                atom_name("MG"),
+                atom_name("NA"),
+                atom_name("MG"),
+                atom_name("NA"),
             ],
             elements: vec![Element::Unknown; 4],
         };
@@ -976,8 +1012,14 @@ mod tests {
     #[test]
     fn test_aabb_from_aabbs() {
         let aabbs = vec![
-            Aabb { min: glam::Vec3::ZERO, max: glam::Vec3::ONE },
-            Aabb { min: glam::Vec3::splat(2.0), max: glam::Vec3::splat(3.0) },
+            Aabb {
+                min: glam::Vec3::ZERO,
+                max: glam::Vec3::ONE,
+            },
+            Aabb {
+                min: glam::Vec3::splat(2.0),
+                max: glam::Vec3::splat(3.0),
+            },
         ];
         let merged = Aabb::from_aabbs(&aabbs).unwrap();
         assert_eq!(merged.min, glam::Vec3::ZERO);

@@ -1,12 +1,14 @@
 //! PDB and mmCIF format parsing and writing.
 
 use pdbtbx::{
-    ContainsAtomConformer, ContainsAtomConformerResidue, ContainsAtomConformerResidueChain,
-    Format, ReadOptions, StrictnessLevel,
+    ContainsAtomConformer, ContainsAtomConformerResidue, ContainsAtomConformerResidueChain, Format,
+    ReadOptions, StrictnessLevel,
 };
 use std::io::BufReader;
 
-use crate::types::coords::{deserialize, serialize, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element};
+use crate::types::coords::{
+    deserialize, serialize, ChainIdMapper, Coords, CoordsAtom, CoordsError, Element,
+};
 use crate::types::entity::{split_into_entities, MoleculeEntity};
 
 /// Parse PDB format string to COORDS binary format.
@@ -76,7 +78,8 @@ fn sanitize_pdb(content: &str) -> String {
 /// Load a structure file (PDB or mmCIF) by detecting format from extension.
 /// Falls back to mmCIF if extension is unrecognized.
 pub fn structure_file_to_coords(path: &std::path::Path) -> Result<Coords, CoordsError> {
-    let ext = path.extension()
+    let ext = path
+        .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
@@ -230,7 +233,9 @@ pub fn mmcif_file_to_entities(path: &std::path::Path) -> Result<Vec<MoleculeEnti
 }
 
 /// Load structure file (PDB or mmCIF, detected by extension) to entity list.
-pub fn structure_file_to_entities(path: &std::path::Path) -> Result<Vec<MoleculeEntity>, CoordsError> {
+pub fn structure_file_to_entities(
+    path: &std::path::Path,
+) -> Result<Vec<MoleculeEntity>, CoordsError> {
     let coords = structure_file_to_coords(path)?;
     Ok(split_into_entities(&coords))
 }

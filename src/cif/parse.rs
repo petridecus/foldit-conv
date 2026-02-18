@@ -310,10 +310,7 @@ mod tests {
         let input = "data_test\n_tag1 'hello world'\n_tag2 \"another value\"\n";
         let doc = parse(input).unwrap();
         let block = &doc.blocks[0];
-        assert_eq!(
-            block.get("_tag1"),
-            Some(&Value::Str("hello world".into()))
-        );
+        assert_eq!(block.get("_tag1"), Some(&Value::Str("hello world".into())));
         assert_eq!(
             block.get("_tag2"),
             Some(&Value::Str("another value".into()))
@@ -405,8 +402,14 @@ mod tests {
         let cols = doc.blocks[0].columns(&["_c", "_a"]).unwrap();
         let rows: Vec<_> = cols.iter().collect();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0], vec![&Value::Str("3".into()), &Value::Str("1".into())]);
-        assert_eq!(rows[1], vec![&Value::Str("6".into()), &Value::Str("4".into())]);
+        assert_eq!(
+            rows[0],
+            vec![&Value::Str("3".into()), &Value::Str("1".into())]
+        );
+        assert_eq!(
+            rows[1],
+            vec![&Value::Str("6".into()), &Value::Str("4".into())]
+        );
     }
 
     #[test]
@@ -502,7 +505,10 @@ ATOM C   ALA A 1 12.000 22.000 32.000 C 1.00 17.0
 
         // Space group
         assert_eq!(
-            block.get("_symmetry.space_group_name_H-M").unwrap().as_str(),
+            block
+                .get("_symmetry.space_group_name_H-M")
+                .unwrap()
+                .as_str(),
             Some("P 21 21 21")
         );
 
