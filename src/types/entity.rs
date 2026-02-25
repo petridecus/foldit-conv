@@ -9,6 +9,9 @@
 
 use super::coords::{Coords, Element};
 use crate::ops::transform::PROTEIN_RESIDUES;
+use crate::render::backbone::{BackboneChain, ProteinBackbone};
+use crate::render::sidechain::{SidechainAtomData, SidechainAtoms};
+use glam::Vec3;
 use std::collections::{BTreeMap, HashMap};
 
 /// Classification of molecule types found in structural biology files.
@@ -380,6 +383,209 @@ impl MoleculeEntity {
             seen.insert((self.coords.chain_ids[i], self.coords.res_nums[i]));
         }
         seen.len()
+    }
+
+    /// Extract protein backbone chains (N-CA-C interleaved, split at chain breaks).
+    ///
+    /// Returns a [`ProteinBackbone`] containing one [`BackboneChain`] per
+    /// contiguous polymer segment. Chain breaks are detected by chain ID changes
+    /// or residue number gaps > 1.
+    ///
+    /// Only meaningful for protein entities; returns an empty backbone for
+    /// other molecule types.
+    pub fn extract_backbone(&self) -> ProteinBackbone {
+        if self.molecule_type != MoleculeType::Protein {
+            return ProteinBackbone {
+                chains: Vec::new(),
+                chain_ids: Vec::new(),
+            };
+        }
+
+        let mut chains: Vec<Vec<Vec3>> = Vec::new();
+        let mut chain_ids: Vec<u8> = Vec::new();
+        let mut current_chain: Vec<Vec3> = Vec::new();
+        let mut current_chain_id: Option<u8> = None;
+        let mut last_chain_id: Option<u8> = None;
+        let mut last_res_num: Option<i32> = None;
+
+        for i in 0..self.coords.num_atoms {
+            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+
+            if atom_name != "N" && atom_name != "CA" && atom_name != "C" {
+                continue;
+            }
+
+            let chain_id = self.coords.chain_ids[i];
+            let res_num = self.coords.res_nums[i];
+            let a = &self.coords.atoms[i];
+            let pos = Vec3::new(a.x, a.y, a.z);
+
+            let is_chain_break = last_chain_id.is_some_and(|c| c != chain_id);
+            let is_sequence_gap = last_res_num.is_some_and(|r| (res_num - r).abs() > 1);
+
+            if (is_chain_break || is_sequence_gap) && !current_chain.is_empty() {
+                chains.push(std::mem::take(&mut current_chain));
+                if let Some(cid) = current_chain_id.take() {
+                    chain_ids.push(cid);
+                }
+            }
+
+            current_chain.push(pos);
+
+            if atom_name == "CA" {
+                if current_chain_id.is_none() {
+                    current_chain_id = Some(chain_id);
+                }
+                last_res_num = Some(res_num);
+            }
+            last_chain_id = Some(chain_id);
+        }
+
+        if !current_chain.is_empty() {
+            chains.push(current_chain);
+            if let Some(cid) = current_chain_id {
+                chain_ids.push(cid);
+            }
+        }
+
+        ProteinBackbone {
+            chains: chains.into_iter().map(BackboneChain::new).collect(),
+            chain_ids,
+        }
+    }
+
+    /// Extract sidechain atom data with topology.
+    ///
+    /// `is_hydrophobic` classifies a residue name (e.g. "ALA") as hydrophobic.
+    /// `get_bonds` returns intra-residue bond pairs for a residue name.
+    ///
+    /// Produces a [`SidechainAtoms`] with positions, bonds, and backbone-sidechain
+    /// (CA→CB) connections. Hydrogen atoms are excluded.
+    pub fn extract_sidechains<F, G>(&self, is_hydrophobic: F, get_bonds: G) -> SidechainAtoms
+    where
+        F: Fn(&str) -> bool,
+        G: Fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
+    {
+        if self.molecule_type != MoleculeType::Protein {
+            return SidechainAtoms::default();
+        }
+
+        let mut atoms_out: Vec<SidechainAtomData> = Vec::new();
+        let mut bonds_out: Vec<(u32, u32)> = Vec::new();
+        let mut backbone_bonds: Vec<(Vec3, u32)> = Vec::new();
+
+        // Map (chain_id, res_num, atom_name) -> sidechain index for bond generation
+        let mut atom_index_map: HashMap<(u8, i32, String), u32> = HashMap::new();
+        // Map (chain_id, res_num) -> sequential residue index
+        let mut residue_idx_map: HashMap<(u8, i32), u32> = HashMap::new();
+        let mut next_residue_idx: u32 = 0;
+
+        // First pass: collect sidechain atoms and assign residue indices
+        for i in 0..self.coords.num_atoms {
+            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let chain_id = self.coords.chain_ids[i];
+            let res_num = self.coords.res_nums[i];
+            let res_name = std::str::from_utf8(&self.coords.res_names[i])
+                .unwrap_or("UNK")
+                .trim();
+            let a = &self.coords.atoms[i];
+            let pos = Vec3::new(a.x, a.y, a.z);
+            let res_key = (chain_id, res_num);
+
+            match atom_name.as_str() {
+                "CA" => {
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        residue_idx_map.entry(res_key)
+                    {
+                        e.insert(next_residue_idx);
+                        next_residue_idx += 1;
+                    }
+                }
+                "N" | "C" | "O" => {}
+                _ => {
+                    // Skip hydrogens
+                    let is_hydrogen = atom_name.starts_with('H')
+                        || atom_name.starts_with("1H")
+                        || atom_name.starts_with("2H")
+                        || atom_name.starts_with("3H")
+                        || (atom_name.len() >= 2
+                            && atom_name.chars().next().unwrap().is_ascii_digit()
+                            && atom_name.chars().nth(1) == Some('H'));
+
+                    if !is_hydrogen {
+                        let sidechain_idx = atoms_out.len() as u32;
+                        atom_index_map
+                            .insert((chain_id, res_num, atom_name.clone()), sidechain_idx);
+
+                        let residue_idx = residue_idx_map.get(&res_key).copied().unwrap_or(0);
+                        let hydrophobic = is_hydrophobic(res_name);
+
+                        atoms_out.push(SidechainAtomData {
+                            position: pos,
+                            residue_idx,
+                            atom_name,
+                            is_hydrophobic: hydrophobic,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Second pass: generate CA→CB backbone-sidechain bonds
+        for i in 0..self.coords.num_atoms {
+            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+            if atom_name == "CA" {
+                let a = &self.coords.atoms[i];
+                let ca_pos = Vec3::new(a.x, a.y, a.z);
+                let chain_id = self.coords.chain_ids[i];
+                let res_num = self.coords.res_nums[i];
+                let cb_key = (chain_id, res_num, "CB".to_string());
+                if let Some(&cb_idx) = atom_index_map.get(&cb_key) {
+                    backbone_bonds.push((ca_pos, cb_idx));
+                }
+            }
+        }
+
+        // Third pass: generate intra-residue sidechain bonds from topology
+        let mut seen_residues: std::collections::HashSet<(u8, i32)> =
+            std::collections::HashSet::new();
+        for i in 0..self.coords.num_atoms {
+            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+            let chain_id = self.coords.chain_ids[i];
+            let res_num = self.coords.res_nums[i];
+            let res_name = std::str::from_utf8(&self.coords.res_names[i])
+                .unwrap_or("UNK")
+                .trim();
+
+            if atom_name == "CA" && seen_residues.insert((chain_id, res_num)) {
+                if let Some(residue_bonds) = get_bonds(res_name) {
+                    for (a1, a2) in residue_bonds {
+                        let key1 = (chain_id, res_num, a1.to_string());
+                        let key2 = (chain_id, res_num, a2.to_string());
+                        if let (Some(&idx1), Some(&idx2)) =
+                            (atom_index_map.get(&key1), atom_index_map.get(&key2))
+                        {
+                            bonds_out.push((idx1, idx2));
+                        }
+                    }
+                }
+            }
+        }
+
+        SidechainAtoms {
+            atoms: atoms_out,
+            bonds: bonds_out,
+            backbone_bonds,
+        }
     }
 }
 

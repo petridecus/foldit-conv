@@ -4,9 +4,12 @@
 //! GPU renderers need. It separates backbone and sidechain data while
 //! preserving atom identity for lookups.
 
+pub mod backbone;
 pub mod gpu;
+pub mod sidechain;
 
 use crate::types::coords::Coords;
+use crate::types::entity::MoleculeEntity;
 use glam::Vec3;
 use std::collections::HashMap;
 
@@ -67,6 +70,141 @@ impl RenderCoords {
             fn(&str) -> bool,
             fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
         >(coords, Some(bonds), None, None)
+    }
+
+    /// Build from a [`MoleculeEntity`] using the new domain extraction methods.
+    ///
+    /// This delegates backbone extraction to [`MoleculeEntity::extract_backbone()`]
+    /// and sidechain extraction to [`MoleculeEntity::extract_sidechains()`], then
+    /// adds the O-atom residue data and atom lookup that RenderCoords provides
+    /// on top.
+    pub fn from_entity<F, G>(entity: &MoleculeEntity, is_hydrophobic: F, get_bonds: G) -> Self
+    where
+        F: Fn(&str) -> bool,
+        G: Fn(&str) -> Option<Vec<(&'static str, &'static str)>>,
+    {
+        let backbone = entity.extract_backbone();
+        let sidechains = entity.extract_sidechains(&is_hydrophobic, &get_bonds);
+
+        // Build backbone_residue_chains (with O-atom data) — requires a separate pass
+        let mut backbone_residue_chains: Vec<Vec<RenderBackboneResidue>> = Vec::new();
+        let mut current_residues: Vec<RenderBackboneResidue> = Vec::new();
+        let mut current_n: Option<Vec3> = None;
+        let mut current_ca: Option<Vec3> = None;
+        let mut current_c: Option<Vec3> = None;
+        let mut current_o: Option<Vec3> = None;
+        let mut current_res_key: Option<(u8, i32)> = None;
+        let mut last_chain_id: Option<u8> = None;
+        let mut last_res_num: Option<i32> = None;
+
+        let flush_residue =
+            |n: &mut Option<Vec3>,
+             ca: &mut Option<Vec3>,
+             c: &mut Option<Vec3>,
+             o: &mut Option<Vec3>,
+             residues: &mut Vec<RenderBackboneResidue>| {
+                if let (Some(n_val), Some(ca_val), Some(c_val), Some(o_val)) = (*n, *ca, *c, *o) {
+                    residues.push(RenderBackboneResidue {
+                        n_pos: n_val,
+                        ca_pos: ca_val,
+                        c_pos: c_val,
+                        o_pos: o_val,
+                    });
+                }
+                *n = None;
+                *ca = None;
+                *c = None;
+                *o = None;
+            };
+
+        let coords = &entity.coords;
+        for i in 0..coords.num_atoms {
+            let atom_name = std::str::from_utf8(&coords.atom_names[i])
+                .unwrap_or("")
+                .trim();
+            let chain_id = coords.chain_ids[i];
+            let res_num = coords.res_nums[i];
+            let pos = Vec3::new(coords.atoms[i].x, coords.atoms[i].y, coords.atoms[i].z);
+            let res_key = (chain_id, res_num);
+
+            let is_chain_break = last_chain_id.is_some_and(|c| c != chain_id);
+            let is_sequence_gap = last_res_num.is_some_and(|r| (res_num - r).abs() > 1);
+            let is_new_residue = current_res_key != Some(res_key);
+
+            if is_new_residue && current_res_key.is_some() {
+                flush_residue(
+                    &mut current_n,
+                    &mut current_ca,
+                    &mut current_c,
+                    &mut current_o,
+                    &mut current_residues,
+                );
+            }
+
+            if (is_chain_break || is_sequence_gap) && !current_residues.is_empty() {
+                backbone_residue_chains.push(std::mem::take(&mut current_residues));
+            }
+
+            current_res_key = Some(res_key);
+            match atom_name {
+                "N" => current_n = Some(pos),
+                "CA" => {
+                    current_ca = Some(pos);
+                    last_res_num = Some(res_num);
+                }
+                "C" => current_c = Some(pos),
+                "O" => current_o = Some(pos),
+                _ => {}
+            }
+            last_chain_id = Some(chain_id);
+        }
+
+        flush_residue(
+            &mut current_n,
+            &mut current_ca,
+            &mut current_c,
+            &mut current_o,
+            &mut current_residues,
+        );
+        if !current_residues.is_empty() {
+            backbone_residue_chains.push(current_residues);
+        }
+
+        // Build all_positions
+        let all_positions: Vec<Vec3> = coords
+            .atoms
+            .iter()
+            .map(|a| Vec3::new(a.x, a.y, a.z))
+            .collect();
+
+        // Build atom_lookup from sidechain atoms
+        let mut atom_lookup: HashMap<(u32, String), u32> = HashMap::new();
+        let sidechain_render_atoms: Vec<RenderSidechainAtom> = sidechains
+            .atoms
+            .iter()
+            .enumerate()
+            .map(|(idx, a)| {
+                atom_lookup.insert((a.residue_idx, a.atom_name.clone()), idx as u32);
+                RenderSidechainAtom {
+                    position: a.position,
+                    residue_idx: a.residue_idx,
+                    atom_name: a.atom_name.clone(),
+                    chain_id: 0, // not tracked in SidechainAtomData
+                    is_hydrophobic: a.is_hydrophobic,
+                }
+            })
+            .collect();
+
+        Self {
+            backbone_chains: backbone.to_chain_vecs(),
+            backbone_chain_ids: backbone.chain_ids,
+            backbone_residue_chains,
+            sidechain_atoms: sidechain_render_atoms,
+            sidechain_bonds: sidechains.bonds,
+            backbone_sidechain_bonds: sidechains.backbone_bonds,
+            all_positions,
+            atom_lookup,
+        }
     }
 
     fn from_coords_internal<F, G>(
