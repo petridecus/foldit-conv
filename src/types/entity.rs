@@ -463,9 +463,9 @@ impl MoleculeEntity {
     /// Protein: no (focused at group level). Water, Ion: no (ambient).
     /// Ligand, DNA, RNA: yes.
     pub fn is_focusable(&self) -> bool {
-        matches!(
+        !matches!(
             self.molecule_type,
-            MoleculeType::Ligand | MoleculeType::DNA | MoleculeType::RNA | MoleculeType::Cofactor
+            MoleculeType::Water | MoleculeType::Ion | MoleculeType::Solvent
         )
     }
 
