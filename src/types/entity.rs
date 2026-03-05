@@ -968,6 +968,24 @@ pub fn classify_residue(name: &str) -> MoleculeType {
     MoleculeType::Ligand
 }
 
+/// Check whether a set of atom indices (belonging to one residue) contains
+/// protein backbone atoms N, CA, and C — the hallmark of an amino acid.
+fn residue_has_backbone(indices: &[usize], coords: &Coords) -> bool {
+    let mut has_n = false;
+    let mut has_ca = false;
+    let mut has_c = false;
+    for &idx in indices {
+        let name = &coords.atom_names[idx];
+        match name {
+            [b' ', b'N', b' ', b' '] | [b'N', b' ', b' ', b' '] => has_n = true,
+            [b' ', b'C', b'A', b' '] | [b'C', b'A', b' ', b' '] => has_ca = true,
+            [b' ', b'C', b' ', b' '] | [b'C', b' ', b' ', b' '] => has_c = true,
+            _ => {}
+        }
+    }
+    has_n && has_ca && has_c
+}
+
 // ---------------------------------------------------------------------------
 // Entity splitting / merging
 // ---------------------------------------------------------------------------
@@ -1037,6 +1055,41 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
         };
 
         groups.entry(key).or_default().push(i);
+    }
+
+    // Merge modified amino acids back into their protein chain.
+    // A SmallMolecule group that has backbone atoms (N, CA, C) and whose chain
+    // already has a protein entity is a modified residue, not a ligand.
+    let protein_chains: Vec<u8> = groups
+        .keys()
+        .filter_map(|k| match k {
+            EntityKey::Chain(cid, mt) if mt.0 == MoleculeType::Protein => Some(*cid),
+            _ => None,
+        })
+        .collect();
+
+    let merge_keys: Vec<EntityKey> = groups
+        .iter()
+        .filter_map(|(key, indices)| {
+            if let EntityKey::SmallMolecule(chain_id, _, _) = key {
+                if protein_chains.contains(chain_id)
+                    && residue_has_backbone(indices, coords)
+                {
+                    return Some(key.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    for key in merge_keys {
+        if let EntityKey::SmallMolecule(chain_id, _, _) = &key {
+            let chain_key =
+                EntityKey::Chain(*chain_id, MoleculeTypeOrd(MoleculeType::Protein));
+            if let Some(indices) = groups.remove(&key) {
+                groups.entry(chain_key).or_default().extend(indices);
+            }
+        }
     }
 
     // Convert groups to entities
