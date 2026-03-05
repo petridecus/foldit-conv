@@ -117,7 +117,7 @@ impl RenderCoords {
                 *o = None;
             };
 
-        let coords = &entity.coords;
+        let coords = entity.to_coords();
         for i in 0..coords.num_atoms {
             let atom_name = std::str::from_utf8(&coords.atom_names[i])
                 .unwrap_or("")

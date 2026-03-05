@@ -41,6 +41,6 @@ pub use coords::{
 };
 pub use density::{DensityError, DensityMap};
 pub use entity::{
-    classify_residue, extract_by_type, merge_entities, split_into_entities, MoleculeEntity,
-    MoleculeType,
+    classify_residue, coords_to_entity_kind, extract_by_type, merge_entities, split_into_entities,
+    AtomSet, EntityKind, MoleculeEntity, MoleculeType, PolymerChain, PolymerData, Residue,
 };

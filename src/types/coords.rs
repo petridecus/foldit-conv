@@ -516,7 +516,7 @@ pub fn atom_count(coords_bytes: &[u8]) -> Result<usize, CoordsError> {
 // ASSEM01 binary serialization (assembly format with entity metadata)
 // ============================================================================
 
-use super::entity::{MoleculeEntity, MoleculeType};
+use super::entity::{coords_to_entity_kind, MoleculeEntity, MoleculeType};
 
 /// Serialize a list of entities to ASSEM01 binary format.
 ///
@@ -534,7 +534,7 @@ use super::entity::{MoleculeEntity, MoleculeType};
 ///   - 4 bytes: atom_name
 ///   - 2 bytes: element symbol
 pub fn serialize_assembly(entities: &[MoleculeEntity]) -> Result<Vec<u8>, CoordsError> {
-    let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+    let total_atoms: usize = entities.iter().map(|e| e.atom_count()).sum();
     let header_size = 8 + 4 + entities.len() * 5;
     let atom_size = total_atoms * 26;
     let mut buffer = Vec::with_capacity(header_size + atom_size);
@@ -548,12 +548,12 @@ pub fn serialize_assembly(entities: &[MoleculeEntity]) -> Result<Vec<u8>, Coords
     // Per-entity headers
     for entity in entities {
         buffer.push(entity.molecule_type.to_wire_byte());
-        buffer.extend_from_slice(&(entity.coords.num_atoms as u32).to_be_bytes());
+        buffer.extend_from_slice(&(entity.atom_count() as u32).to_be_bytes());
     }
 
     // Atom data (same layout as COORDS01)
     for entity in entities {
-        let c = &entity.coords;
+        let c = entity.to_coords();
         for i in 0..c.num_atoms {
             let atom = &c.atoms[i];
             buffer.extend_from_slice(&atom.x.to_be_bytes());
@@ -681,18 +681,20 @@ pub fn deserialize_assembly(bytes: &[u8]) -> Result<Vec<MoleculeEntity>, CoordsE
             cursor = &cursor[2..];
         }
 
+        let coords = Coords {
+            num_atoms: atom_count,
+            atoms,
+            chain_ids,
+            res_names,
+            res_nums,
+            atom_names,
+            elements,
+        };
+        let kind = coords_to_entity_kind(mol_type, coords);
         entities.push(MoleculeEntity {
             entity_id: entity_id as u32,
             molecule_type: mol_type,
-            coords: Coords {
-                num_atoms: atom_count,
-                atoms,
-                chain_ids,
-                res_names,
-                res_nums,
-                atom_names,
-                elements,
-            },
+            kind,
         });
     }
 

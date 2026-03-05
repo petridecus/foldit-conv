@@ -121,7 +121,7 @@ fn mol_type_str_to_molecule_type(s: &str) -> MoleculeType {
 /// - `BondList` populated from entity bond data or distance inference
 fn entities_to_atom_array_impl(py: Python, entities: &[MoleculeEntity]) -> PyResult<Py<PyAny>> {
     // Count total atoms across all entities
-    let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+    let total_atoms: usize = entities.iter().map(|e| e.atom_count()).sum();
     if total_atoms == 0 {
         let biotite = py.import("biotite.structure")?;
         let arr = biotite.getattr("AtomArray")?.call1((0,))?;
@@ -156,7 +156,7 @@ fn entities_to_atom_array_impl(py: Python, entities: &[MoleculeEntity]) -> PyRes
     let mut atom_offset: usize = 0;
 
     for entity in entities {
-        let c = &entity.coords;
+        let c = entity.to_coords();
         let entity_id = entity.entity_id as i32;
         let mol_type_str = molecule_type_to_mol_type_str(entity.molecule_type).to_string();
         let chain_type_id = molecule_type_to_chain_type_id(entity.molecule_type) as i32;
@@ -209,7 +209,7 @@ fn entities_to_atom_array_impl(py: Python, entities: &[MoleculeEntity]) -> PyRes
         );
 
         if needs_inference && c.num_atoms >= 2 && c.num_atoms <= 500 {
-            let inferred = infer_bonds(c, DEFAULT_TOLERANCE);
+            let inferred = infer_bonds(&c, DEFAULT_TOLERANCE);
             for bond in &inferred {
                 let bt = match bond.order {
                     BondOrder::Single => 1u8,
@@ -563,18 +563,20 @@ pub fn atom_array_to_entities(py: Python, atom_array: Py<PyAny>) -> PyResult<Vec
             elems.push(elem);
         }
 
+        let coords = Coords {
+            num_atoms: n,
+            atoms,
+            chain_ids: entity_chain_ids,
+            res_names: entity_res_names,
+            res_nums,
+            atom_names: entity_atom_names,
+            elements: elems,
+        };
+        let kind = crate::types::entity::coords_to_entity_kind(mol_type, coords);
         entities.push(MoleculeEntity {
             entity_id: output_idx as u32,
             molecule_type: mol_type,
-            coords: Coords {
-                num_atoms: n,
-                atoms,
-                chain_ids: entity_chain_ids,
-                res_names: entity_res_names,
-                res_nums,
-                atom_names: entity_atom_names,
-                elements: elems,
-            },
+            kind,
         });
     }
 

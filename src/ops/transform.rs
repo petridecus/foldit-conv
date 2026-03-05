@@ -530,7 +530,9 @@ fn align_assembly_bytes(
 
     // Apply same transform to every entity
     for entity in &mut entities {
-        transform_coords(&mut entity.coords, rotation, translation);
+        let mut coords = entity.to_coords();
+        transform_coords(&mut coords, rotation, translation);
+        entity.kind = crate::types::entity::coords_to_entity_kind(entity.molecule_type, coords);
     }
 
     serialize_assembly(&entities)

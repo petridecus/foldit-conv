@@ -88,10 +88,9 @@ pub fn update_entities_from_backend(entities: &mut Vec<MoleculeEntity>, backend_
     eprintln!("[assembly::update_entities_from_backend] new entities:");
     for e in &new_entities {
         eprintln!(
-            "  {:?}: {} atoms (chain {:?})",
+            "  {:?}: {} atoms",
             e.molecule_type,
-            e.coords.num_atoms,
-            e.coords.chain_ids.first().map(|&c| c as char)
+            e.atom_count(),
         );
     }
 
@@ -126,7 +125,7 @@ pub fn update_entities_from_backend(entities: &mut Vec<MoleculeEntity>, backend_
 
     *entities = updated;
 
-    let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+    let total_atoms: usize = entities.iter().map(|e| e.atom_count()).sum();
     eprintln!(
         "[assembly::update_entities_from_backend] final: {} entities, {} total atoms",
         entities.len(),
@@ -327,7 +326,8 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
         // Build chain ID remap for this group
         let mut chain_id_map: HashMap<u8, u8> = HashMap::new();
         for entity in *entity_slice {
-            for &cid in &entity.coords.chain_ids {
+            let c = entity.to_coords();
+            for &cid in &c.chain_ids {
                 chain_id_map.entry(cid).or_insert_with(|| {
                     let id = next_chain_id;
                     next_chain_id = if next_chain_id == b'Z' {
@@ -347,13 +347,14 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
         let mut protein_residue_count: usize = 0;
         for entity in *entity_slice {
             if entity.molecule_type == MoleculeType::Protein {
+                let c = entity.to_coords();
                 let mut seen = std::collections::HashSet::new();
-                for i in 0..entity.coords.num_atoms {
-                    let atom_name = std::str::from_utf8(&entity.coords.atom_names[i])
+                for i in 0..c.num_atoms {
+                    let atom_name = std::str::from_utf8(&c.atom_names[i])
                         .unwrap_or("")
                         .trim();
                     if atom_name == "CA" {
-                        seen.insert((entity.coords.chain_ids[i], entity.coords.res_nums[i]));
+                        seen.insert((c.chain_ids[i], c.res_nums[i]));
                     }
                 }
                 protein_residue_count += seen.len();
@@ -367,27 +368,19 @@ pub fn prepare_combined_assembly(groups: &[&[MoleculeEntity]]) -> Option<Combine
             global_residue_offset = end;
         }
 
-        // Clone and remap entities
+        // Clone and remap entities (via to_coords → remap → reconstruct)
         for entity in *entity_slice {
-            let c = &entity.coords;
-            let remapped_chain_ids: Vec<u8> = c
-                .chain_ids
-                .iter()
-                .map(|&cid| *chain_id_map.get(&cid).unwrap_or(&cid))
-                .collect();
-
+            let mut c = entity.to_coords();
+            for cid in &mut c.chain_ids {
+                if let Some(&mapped) = chain_id_map.get(cid) {
+                    *cid = mapped;
+                }
+            }
+            let kind = super::entity::coords_to_entity_kind(entity.molecule_type, c);
             all_entities.push(MoleculeEntity {
                 entity_id: entity.entity_id,
                 molecule_type: entity.molecule_type,
-                coords: Coords {
-                    num_atoms: c.num_atoms,
-                    atoms: c.atoms.clone(),
-                    chain_ids: remapped_chain_ids,
-                    res_names: c.res_names.clone(),
-                    res_nums: c.res_nums.clone(),
-                    atom_names: c.atom_names.clone(),
-                    elements: c.elements.clone(),
-                },
+                kind,
             });
         }
     }
@@ -470,7 +463,7 @@ mod tests {
 
         let mut entities = split_into_entities(&coords);
         assert_eq!(entities.len(), 3); // chain A, chain B, water
-        let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+        let total: usize = entities.iter().map(|e| e.atom_count()).sum();
         assert_eq!(total, 7);
 
         // Simulate a Rosetta update: combined protein coords (both chains, 6 atoms)
@@ -501,7 +494,7 @@ mod tests {
         update_protein_entities(&mut entities, updated_protein);
 
         // Must still have 7 total atoms (6 protein + 1 water), NOT 13
-        let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+        let total: usize = entities.iter().map(|e| e.atom_count()).sum();
         assert_eq!(total, 7);
         assert_eq!(entities.len(), 3); // chain A, chain B, water
 
@@ -511,8 +504,8 @@ mod tests {
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
         assert_eq!(protein_entities.len(), 2);
-        assert_eq!(protein_entities[0].coords.num_atoms, 3);
-        assert_eq!(protein_entities[1].coords.num_atoms, 3);
+        assert_eq!(protein_entities[0].atom_count(), 3);
+        assert_eq!(protein_entities[1].atom_count(), 3);
 
         // Verify protein coords were actually updated (x values should be 10+)
         let prot = protein_coords(&entities);
@@ -545,7 +538,7 @@ mod tests {
         };
 
         update_protein_entities(&mut entities, updated_protein2);
-        let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+        let total: usize = entities.iter().map(|e| e.atom_count()).sum();
         assert_eq!(total, 7); // Still 7, not growing
     }
 
@@ -604,7 +597,7 @@ mod tests {
 
         update_entities_from_backend(&mut entities, backend_export);
 
-        let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+        let total: usize = entities.iter().map(|e| e.atom_count()).sum();
         assert_eq!(total, 5);
 
         let water: Vec<_> = entities
@@ -612,22 +605,22 @@ mod tests {
             .filter(|e| e.molecule_type == MoleculeType::Water)
             .collect();
         assert_eq!(water.len(), 1);
-        assert_eq!(water[0].coords.num_atoms, 1);
-        assert!((water[0].coords.atoms[0].x - 4.0).abs() < 1e-6);
+        assert_eq!(water[0].atom_count(), 1);
+        assert!((water[0].atoms()[0].x - 4.0).abs() < 1e-6);
 
         let protein: Vec<_> = entities
             .iter()
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
         assert_eq!(protein.len(), 1);
-        assert!((protein[0].coords.atoms[0].x - 10.0).abs() < 1e-6);
+        assert!((protein[0].atoms()[0].x - 10.0).abs() < 1e-6);
 
         let ion: Vec<_> = entities
             .iter()
             .filter(|e| e.molecule_type == MoleculeType::Ion)
             .collect();
         assert_eq!(ion.len(), 1);
-        assert!((ion[0].coords.atoms[0].x - 50.0).abs() < 1e-6);
+        assert!((ion[0].atoms()[0].x - 50.0).abs() < 1e-6);
     }
 
     /// Test update_entities_from_backend: protein-only export preserves all non-protein.
@@ -669,7 +662,7 @@ mod tests {
 
         update_entities_from_backend(&mut entities, backend_export);
 
-        let total: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+        let total: usize = entities.iter().map(|e| e.atom_count()).sum();
         assert_eq!(total, 5);
         assert_eq!(entities.len(), 3);
 
@@ -677,14 +670,14 @@ mod tests {
             .iter()
             .filter(|e| e.molecule_type == MoleculeType::Protein)
             .collect();
-        assert!((protein[0].coords.atoms[0].x - 20.0).abs() < 1e-6);
+        assert!((protein[0].atoms()[0].x - 20.0).abs() < 1e-6);
 
         let cofactor: Vec<_> = entities
             .iter()
             .filter(|e| e.molecule_type == MoleculeType::Cofactor)
             .collect();
         assert_eq!(cofactor.len(), 1);
-        assert!((cofactor[0].coords.atoms[0].x - 3.0).abs() < 1e-6);
+        assert!((cofactor[0].atoms()[0].x - 3.0).abs() < 1e-6);
 
         let water: Vec<_> = entities
             .iter()
@@ -736,7 +729,7 @@ mod tests {
 
         for (orig, rt) in entities.iter().zip(roundtripped.iter()) {
             assert_eq!(orig.molecule_type, rt.molecule_type);
-            assert_eq!(orig.coords.num_atoms, rt.coords.num_atoms);
+            assert_eq!(orig.atom_count(), rt.atom_count());
         }
 
         let orig_protein: Vec<_> = entities
@@ -749,12 +742,14 @@ mod tests {
             .collect();
         assert_eq!(orig_protein.len(), rt_protein.len());
         for (o, r) in orig_protein.iter().zip(rt_protein.iter()) {
-            for i in 0..o.coords.num_atoms {
-                assert!((o.coords.atoms[i].x - r.coords.atoms[i].x).abs() < 1e-6);
-                assert_eq!(o.coords.chain_ids[i], r.coords.chain_ids[i]);
-                assert_eq!(o.coords.res_names[i], r.coords.res_names[i]);
-                assert_eq!(o.coords.res_nums[i], r.coords.res_nums[i]);
-                assert_eq!(o.coords.atom_names[i], r.coords.atom_names[i]);
+            let oc = o.to_coords();
+            let rc = r.to_coords();
+            for i in 0..o.atom_count() {
+                assert!((oc.atoms[i].x - rc.atoms[i].x).abs() < 1e-6);
+                assert_eq!(oc.chain_ids[i], rc.chain_ids[i]);
+                assert_eq!(oc.res_names[i], rc.res_names[i]);
+                assert_eq!(oc.res_nums[i], rc.res_nums[i]);
+                assert_eq!(oc.atom_names[i], rc.atom_names[i]);
             }
         }
     }
@@ -778,7 +773,7 @@ mod tests {
         let roundtripped = deserialize_assembly(&bytes).unwrap();
         assert_eq!(roundtripped.len(), 1);
         assert_eq!(roundtripped[0].molecule_type, MoleculeType::Protein);
-        assert_eq!(roundtripped[0].coords.num_atoms, 3);
+        assert_eq!(roundtripped[0].atom_count(), 3);
     }
 
     #[test]
@@ -800,8 +795,8 @@ mod tests {
         let roundtripped = deserialize_assembly(&bytes).unwrap();
         assert_eq!(roundtripped.len(), 1);
         assert_eq!(roundtripped[0].molecule_type, MoleculeType::Ion);
-        assert_eq!(roundtripped[0].coords.num_atoms, 1);
-        assert!((roundtripped[0].coords.atoms[0].x - 5.5).abs() < 1e-6);
+        assert_eq!(roundtripped[0].atom_count(), 1);
+        assert!((roundtripped[0].atoms()[0].x - 5.5).abs() < 1e-6);
     }
 
     #[test]
@@ -818,24 +813,26 @@ mod tests {
     fn test_assembly_byte_layout() {
         use crate::types::coords::serialize_assembly;
 
+        let coords = Coords {
+            num_atoms: 1,
+            atoms: vec![CoordsAtom {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                occupancy: 1.0,
+                b_factor: 0.0,
+            }],
+            chain_ids: vec![b'A'],
+            res_names: vec![res_name("ALA")],
+            res_nums: vec![1],
+            atom_names: vec![atom_name("CA")],
+            elements: vec![Element::C],
+        };
+        let kind = super::super::entity::coords_to_entity_kind(MoleculeType::Protein, coords);
         let entities = vec![MoleculeEntity {
             entity_id: 0,
             molecule_type: MoleculeType::Protein,
-            coords: Coords {
-                num_atoms: 1,
-                atoms: vec![CoordsAtom {
-                    x: 1.0,
-                    y: 2.0,
-                    z: 3.0,
-                    occupancy: 1.0,
-                    b_factor: 0.0,
-                }],
-                chain_ids: vec![b'A'],
-                res_names: vec![res_name("ALA")],
-                res_nums: vec![1],
-                atom_names: vec![atom_name("CA")],
-                elements: vec![Element::C],
-            },
+            kind,
         }];
 
         let bytes = serialize_assembly(&entities).unwrap();

@@ -2,17 +2,21 @@
 //!
 //! Provides:
 //! - `MoleculeType` — classification of residues into protein, DNA, RNA, ligand, ion, water
-//! - `MoleculeEntity` — a single entity (chain or group) with its own `Coords`
+//! - `AtomSet` — core atom data (positions + chemistry, no PDB artifacts)
+//! - `PolymerData` / `PolymerChain` / `Residue` — structured polymer hierarchy
+//! - `EntityKind` — discriminated union of polymer, small molecule, and bulk entity data
+//! - `MoleculeEntity` — a single entity with its own `EntityKind`
 //! - `classify_residue()` — classify a residue name into a `MoleculeType`
 //! - `split_into_entities()` — split flat `Coords` into per-entity groups
 //! - `merge_entities()` — recombine entities back into flat `Coords`
 
-use super::coords::{Coords, Element};
+use super::coords::{Coords, CoordsAtom, Element};
 use crate::ops::transform::PROTEIN_RESIDUES;
 use crate::render::backbone::{BackboneChain, ProteinBackbone};
 use crate::render::sidechain::{SidechainAtomData, SidechainAtoms};
 use glam::Vec3;
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Range;
 
 /// Classification of molecule types found in structural biology files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -110,13 +114,112 @@ impl Aabb {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Core atom data
+// ---------------------------------------------------------------------------
+
+/// Core atom data — chemistry only, no format artifacts.
+#[derive(Debug, Clone)]
+pub struct AtomSet {
+    pub atoms: Vec<CoordsAtom>,
+    pub atom_names: Vec<[u8; 4]>,
+    pub elements: Vec<Element>,
+}
+
+impl AtomSet {
+    pub fn len(&self) -> usize {
+        self.atoms.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.atoms.is_empty()
+    }
+
+    pub fn positions(&self) -> Vec<Vec3> {
+        self.atoms
+            .iter()
+            .map(|a| Vec3::new(a.x, a.y, a.z))
+            .collect()
+    }
+
+    /// Convert to a minimal `Coords` (for bond inference compatibility).
+    /// Chain IDs and residue metadata are set to dummy values.
+    pub fn to_coords_minimal(&self) -> Coords {
+        let n = self.atoms.len();
+        Coords {
+            num_atoms: n,
+            atoms: self.atoms.clone(),
+            chain_ids: vec![b' '; n],
+            res_names: vec![[b' '; 3]; n],
+            res_nums: vec![0; n],
+            atom_names: self.atom_names.clone(),
+            elements: self.elements.clone(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structured polymer data
+// ---------------------------------------------------------------------------
+
+/// A single residue within a polymer chain.
+#[derive(Debug, Clone)]
+pub struct Residue {
+    /// 3-character residue name (e.g. b"ALA").
+    pub name: [u8; 3],
+    /// Residue sequence number.
+    pub number: i32,
+    /// Index range into the parent `PolymerData.atoms`.
+    pub atom_range: Range<usize>,
+}
+
+/// A single polymer chain.
+#[derive(Debug, Clone)]
+pub struct PolymerChain {
+    pub chain_id: u8,
+    pub residues: Vec<Residue>,
+}
+
+/// Structured polymer data — chains containing residues containing atoms.
+#[derive(Debug, Clone)]
+pub struct PolymerData {
+    pub atoms: AtomSet,
+    pub chains: Vec<PolymerChain>,
+}
+
+// ---------------------------------------------------------------------------
+// EntityKind
+// ---------------------------------------------------------------------------
+
+/// Discriminated union of entity data variants.
+#[derive(Debug, Clone)]
+pub enum EntityKind {
+    /// Polymer chain (protein/DNA/RNA) — structured chain/residue hierarchy.
+    Polymer(PolymerData),
+    /// Single non-polymer molecule (ligand, cofactor, lipid, ion).
+    SmallMolecule {
+        atoms: AtomSet,
+        residue_name: [u8; 3],
+        display_name: String,
+    },
+    /// Bulk group (water, solvent) — many identical small molecules.
+    Bulk {
+        atoms: AtomSet,
+        residue_name: [u8; 3],
+        molecule_count: usize,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// MoleculeEntity
+// ---------------------------------------------------------------------------
+
 /// A single entity: one logical molecule (a protein chain, a ligand, waters, etc.)
-/// with its own coordinate set.
 #[derive(Debug, Clone)]
 pub struct MoleculeEntity {
     pub entity_id: u32,
     pub molecule_type: MoleculeType,
-    pub coords: Coords,
+    pub kind: EntityKind,
 }
 
 /// Pre-extracted ring geometry for a single nucleotide base.
@@ -154,71 +257,205 @@ fn is_purine(res_name: &str) -> bool {
 }
 
 impl MoleculeEntity {
-    /// Compute the axis-aligned bounding box for this entity's atoms.
-    pub fn aabb(&self) -> Option<Aabb> {
-        Aabb::from_positions(&self.positions())
+    // -- Convenience accessors --
+
+    /// Reference to the underlying `AtomSet`.
+    pub fn atom_set(&self) -> &AtomSet {
+        match &self.kind {
+            EntityKind::Polymer(data) => &data.atoms,
+            EntityKind::SmallMolecule { atoms, .. } => atoms,
+            EntityKind::Bulk { atoms, .. } => atoms,
+        }
     }
 
     /// All atom positions as Vec3.
     pub fn positions(&self) -> Vec<glam::Vec3> {
-        self.coords
-            .atoms
-            .iter()
-            .map(|a| glam::Vec3::new(a.x, a.y, a.z))
-            .collect()
+        self.atom_set().positions()
+    }
+
+    /// Number of atoms in this entity.
+    pub fn atom_count(&self) -> usize {
+        self.atom_set().len()
+    }
+
+    /// Slice of all atoms.
+    pub fn atoms(&self) -> &[CoordsAtom] {
+        &self.atom_set().atoms
+    }
+
+    /// Slice of all elements.
+    pub fn elements(&self) -> &[Element] {
+        &self.atom_set().elements
+    }
+
+    /// Slice of all atom names.
+    pub fn atom_names(&self) -> &[[u8; 4]] {
+        &self.atom_set().atom_names
+    }
+
+    /// If this entity is a polymer, return the structured data.
+    pub fn as_polymer(&self) -> Option<&PolymerData> {
+        match &self.kind {
+            EntityKind::Polymer(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Convert to a flat `Coords` for serialization or interop.
+    pub fn to_coords(&self) -> Coords {
+        match &self.kind {
+            EntityKind::Polymer(data) => {
+                let n = data.atoms.len();
+                let mut chain_ids = Vec::with_capacity(n);
+                let mut res_names = Vec::with_capacity(n);
+                let mut res_nums = Vec::with_capacity(n);
+                for chain in &data.chains {
+                    for residue in &chain.residues {
+                        for _ in residue.atom_range.clone() {
+                            chain_ids.push(chain.chain_id);
+                            res_names.push(residue.name);
+                            res_nums.push(residue.number);
+                        }
+                    }
+                }
+                Coords {
+                    num_atoms: n,
+                    atoms: data.atoms.atoms.clone(),
+                    chain_ids,
+                    res_names,
+                    res_nums,
+                    atom_names: data.atoms.atom_names.clone(),
+                    elements: data.atoms.elements.clone(),
+                }
+            }
+            EntityKind::SmallMolecule {
+                atoms,
+                residue_name,
+                ..
+            } => {
+                let n = atoms.len();
+                Coords {
+                    num_atoms: n,
+                    atoms: atoms.atoms.clone(),
+                    chain_ids: vec![b' '; n],
+                    res_names: vec![*residue_name; n],
+                    res_nums: vec![1; n],
+                    atom_names: atoms.atom_names.clone(),
+                    elements: atoms.elements.clone(),
+                }
+            }
+            EntityKind::Bulk {
+                atoms,
+                residue_name,
+                ..
+            } => {
+                let n = atoms.len();
+                Coords {
+                    num_atoms: n,
+                    atoms: atoms.atoms.clone(),
+                    chain_ids: vec![b' '; n],
+                    res_names: vec![*residue_name; n],
+                    res_nums: (1..=n as i32).collect(),
+                    atom_names: atoms.atom_names.clone(),
+                    elements: atoms.elements.clone(),
+                }
+            }
+        }
+    }
+
+    /// Compute the axis-aligned bounding box for this entity's atoms.
+    pub fn aabb(&self) -> Option<Aabb> {
+        Aabb::from_positions(&self.positions())
     }
 
     /// Human-readable label (e.g. "Protein Chain A", "Ligand (ATP)", "Zn²⁺ Ion").
     pub fn label(&self) -> String {
         match self.molecule_type {
             MoleculeType::Protein => {
-                // Collect unique chain IDs
-                let mut chains: Vec<u8> = self.coords.chain_ids.to_vec();
-                chains.sort_unstable();
-                chains.dedup();
-                if chains.len() == 1 {
-                    format!("Protein Chain {}", chains[0] as char)
+                if let EntityKind::Polymer(data) = &self.kind {
+                    let chains: Vec<u8> = data.chains.iter().map(|c| c.chain_id).collect();
+                    if chains.len() == 1 {
+                        format!("Protein Chain {}", chains[0] as char)
+                    } else {
+                        let chain_str: String = chains.iter().map(|&c| c as char).collect();
+                        format!("Protein Chains {}", chain_str)
+                    }
                 } else {
-                    let chain_str: String = chains.iter().map(|&c| c as char).collect();
-                    format!("Protein Chains {}", chain_str)
+                    "Protein".to_string()
                 }
             }
-            MoleculeType::DNA => "DNA".to_string(),
-            MoleculeType::RNA => "RNA".to_string(),
+            MoleculeType::DNA => {
+                if let EntityKind::Polymer(data) = &self.kind {
+                    let chains: Vec<u8> = data.chains.iter().map(|c| c.chain_id).collect();
+                    if chains.len() == 1 {
+                        format!("DNA Chain {}", chains[0] as char)
+                    } else {
+                        "DNA".to_string()
+                    }
+                } else {
+                    "DNA".to_string()
+                }
+            }
+            MoleculeType::RNA => {
+                if let EntityKind::Polymer(data) = &self.kind {
+                    let chains: Vec<u8> = data.chains.iter().map(|c| c.chain_id).collect();
+                    if chains.len() == 1 {
+                        format!("RNA Chain {}", chains[0] as char)
+                    } else {
+                        "RNA".to_string()
+                    }
+                } else {
+                    "RNA".to_string()
+                }
+            }
             MoleculeType::Ligand => {
-                // Use the first residue name as the ligand identifier
-                if let Some(rn) = self.coords.res_names.first() {
-                    let name = std::str::from_utf8(rn).unwrap_or("???").trim();
-                    format!("Ligand ({})", name)
+                if let EntityKind::SmallMolecule { display_name, .. } = &self.kind {
+                    format!("Ligand ({})", display_name)
                 } else {
                     "Ligand".to_string()
                 }
             }
             MoleculeType::Ion => {
-                if let Some(rn) = self.coords.res_names.first() {
-                    let name = std::str::from_utf8(rn).unwrap_or("???").trim();
-                    format!("{} Ion", name)
+                if let EntityKind::SmallMolecule { display_name, .. } = &self.kind {
+                    format!("{} Ion", display_name)
                 } else {
                     "Ion".to_string()
                 }
             }
-            MoleculeType::Water => format!("Water ({} molecules)", self.residue_count()),
-            MoleculeType::Lipid => format!("Lipid ({} molecules)", self.residue_count()),
+            MoleculeType::Water => {
+                if let EntityKind::Bulk {
+                    molecule_count, ..
+                } = &self.kind
+                {
+                    format!("Water ({} molecules)", molecule_count)
+                } else {
+                    "Water".to_string()
+                }
+            }
+            MoleculeType::Lipid => {
+                if let EntityKind::SmallMolecule { display_name, .. } = &self.kind {
+                    format!("Lipid ({})", display_name)
+                } else {
+                    format!("Lipid ({} molecules)", self.residue_count())
+                }
+            }
             MoleculeType::Cofactor => {
-                if let Some(rn) = self.coords.res_names.first() {
-                    let name = std::str::from_utf8(rn).unwrap_or("???").trim();
-                    let display = cofactor_display_name(name);
-                    let count = self.residue_count();
-                    if count > 1 {
-                        format!("{} ({} molecules)", display, count)
-                    } else {
-                        display.to_string()
-                    }
+                if let EntityKind::SmallMolecule { display_name, .. } = &self.kind {
+                    display_name.clone()
                 } else {
                     "Cofactor".to_string()
                 }
             }
-            MoleculeType::Solvent => format!("Solvent ({} molecules)", self.residue_count()),
+            MoleculeType::Solvent => {
+                if let EntityKind::Bulk {
+                    molecule_count, ..
+                } = &self.kind
+                {
+                    format!("Solvent ({} molecules)", molecule_count)
+                } else {
+                    "Solvent".to_string()
+                }
+            }
         }
     }
 
@@ -233,9 +470,7 @@ impl MoleculeEntity {
     }
 
     /// Extract phosphorus (P) atom positions grouped by chain ID.
-    /// Returns one chain per polymer chain, each containing the P-atom positions in order.
-    /// Chains are split at gaps where consecutive P-P distance exceeds ~8 Å
-    /// (typical P-P distance is ~5.8–6.5 Å).
+    /// Chains are split at gaps where consecutive P-P distance exceeds ~8 Å.
     /// Only meaningful for DNA/RNA entities; returns empty for other molecule types.
     pub fn extract_p_atom_chains(&self) -> Vec<Vec<glam::Vec3>> {
         const MAX_PP_DIST_SQ: f32 = 8.0 * 8.0;
@@ -244,18 +479,27 @@ impl MoleculeEntity {
             return Vec::new();
         }
 
+        let data = match &self.kind {
+            EntityKind::Polymer(data) => data,
+            _ => return Vec::new(),
+        };
+
         let mut raw_chains: BTreeMap<u8, Vec<glam::Vec3>> = BTreeMap::new();
 
-        for i in 0..self.coords.num_atoms {
-            let name = std::str::from_utf8(&self.coords.atom_names[i])
-                .unwrap_or("")
-                .trim();
-            if name == "P" {
-                let a = &self.coords.atoms[i];
-                raw_chains
-                    .entry(self.coords.chain_ids[i])
-                    .or_default()
-                    .push(glam::Vec3::new(a.x, a.y, a.z));
+        for chain in &data.chains {
+            for residue in &chain.residues {
+                for idx in residue.atom_range.clone() {
+                    let name = std::str::from_utf8(&data.atoms.atom_names[idx])
+                        .unwrap_or("")
+                        .trim();
+                    if name == "P" {
+                        let a = &data.atoms.atoms[idx];
+                        raw_chains
+                            .entry(chain.chain_id)
+                            .or_default()
+                            .push(glam::Vec3::new(a.x, a.y, a.z));
+                    }
+                }
             }
         }
 
@@ -284,80 +528,77 @@ impl MoleculeEntity {
     }
 
     /// Extract base ring geometry for each nucleotide residue.
-    /// Returns one `NucleotideRing` per residue that has the required atoms.
     /// Only meaningful for DNA/RNA entities; returns empty for other molecule types.
     pub fn extract_base_rings(&self) -> Vec<NucleotideRing> {
         if !matches!(self.molecule_type, MoleculeType::DNA | MoleculeType::RNA) {
             return Vec::new();
         }
 
-        // Group atom indices by (chain_id, res_num)
-        let mut residue_atoms: BTreeMap<(u8, i32), Vec<usize>> = BTreeMap::new();
-        for i in 0..self.coords.num_atoms {
-            let key = (self.coords.chain_ids[i], self.coords.res_nums[i]);
-            residue_atoms.entry(key).or_default().push(i);
-        }
+        let data = match &self.kind {
+            EntityKind::Polymer(data) => data,
+            _ => return Vec::new(),
+        };
 
         let mut rings = Vec::new();
         let mut skipped_partial = 0u32;
-        for indices in residue_atoms.values() {
-            // Get residue name from first atom
-            let res_name = std::str::from_utf8(&self.coords.res_names[indices[0]])
-                .unwrap_or("")
-                .trim();
 
-            let color = match ndb_base_color(res_name) {
-                Some(c) => c,
-                None => continue,
-            };
-
-            // Build atom_name -> position map for this residue.
-            // Use owned Strings with robust trimming (whitespace + null bytes)
-            // to handle varying parser conventions.
-            let mut atom_map: HashMap<String, glam::Vec3> = HashMap::new();
-            for &idx in indices {
-                let name = std::str::from_utf8(&self.coords.atom_names[idx])
+        for chain in &data.chains {
+            for residue in &chain.residues {
+                let res_name = std::str::from_utf8(&residue.name)
                     .unwrap_or("")
-                    .trim()
-                    .trim_matches('\0')
-                    .to_owned();
-                let a = &self.coords.atoms[idx];
-                atom_map.insert(name, glam::Vec3::new(a.x, a.y, a.z));
-            }
+                    .trim();
 
-            // Collect hex ring positions
-            let hex_ring: Vec<glam::Vec3> = HEX_RING_ATOMS
-                .iter()
-                .filter_map(|name| atom_map.get(*name).copied())
-                .collect();
-            if hex_ring.len() != 6 {
-                skipped_partial += 1;
-                continue;
-            }
+                let color = match ndb_base_color(res_name) {
+                    Some(c) => c,
+                    None => continue,
+                };
 
-            // Collect pent ring for purines
-            let pent_ring = if is_purine(res_name) {
-                let pent: Vec<glam::Vec3> = PENT_RING_ATOMS
+                // Build atom_name -> position map for this residue
+                let mut atom_map: HashMap<String, glam::Vec3> = HashMap::new();
+                for idx in residue.atom_range.clone() {
+                    let name = std::str::from_utf8(&data.atoms.atom_names[idx])
+                        .unwrap_or("")
+                        .trim()
+                        .trim_matches('\0')
+                        .to_owned();
+                    let a = &data.atoms.atoms[idx];
+                    atom_map.insert(name, glam::Vec3::new(a.x, a.y, a.z));
+                }
+
+                // Collect hex ring positions
+                let hex_ring: Vec<glam::Vec3> = HEX_RING_ATOMS
                     .iter()
                     .filter_map(|name| atom_map.get(*name).copied())
                     .collect();
-                if pent.len() == 5 {
-                    pent
+                if hex_ring.len() != 6 {
+                    skipped_partial += 1;
+                    continue;
+                }
+
+                // Collect pent ring for purines
+                let pent_ring = if is_purine(res_name) {
+                    let pent: Vec<glam::Vec3> = PENT_RING_ATOMS
+                        .iter()
+                        .filter_map(|name| atom_map.get(*name).copied())
+                        .collect();
+                    if pent.len() == 5 {
+                        pent
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     Vec::new()
-                }
-            } else {
-                Vec::new()
-            };
+                };
 
-            let c1_prime = atom_map.get("C1'").or_else(|| atom_map.get("C1*")).copied();
+                let c1_prime = atom_map.get("C1'").or_else(|| atom_map.get("C1*")).copied();
 
-            rings.push(NucleotideRing {
-                hex_ring,
-                pent_ring,
-                color,
-                c1_prime,
-            });
+                rings.push(NucleotideRing {
+                    hex_ring,
+                    pent_ring,
+                    color,
+                    c1_prime,
+                });
+            }
         }
 
         #[cfg(debug_assertions)]
@@ -372,27 +613,23 @@ impl MoleculeEntity {
         rings
     }
 
-    /// Number of residues (for protein/nucleic) or molecules (for small mol/ion/water).
+    /// Number of residues (for polymer/nucleic) or molecules (for small mol/ion/water).
     pub fn residue_count(&self) -> usize {
-        if self.coords.num_atoms == 0 {
-            return 0;
+        match &self.kind {
+            EntityKind::Polymer(data) => {
+                data.chains.iter().map(|c| c.residues.len()).sum()
+            }
+            EntityKind::SmallMolecule { .. } => 1,
+            EntityKind::Bulk {
+                molecule_count, ..
+            } => *molecule_count,
         }
-        // Count unique (chain_id, res_num) pairs
-        let mut seen = std::collections::HashSet::new();
-        for i in 0..self.coords.num_atoms {
-            seen.insert((self.coords.chain_ids[i], self.coords.res_nums[i]));
-        }
-        seen.len()
     }
 
     /// Extract protein backbone chains (N-CA-C interleaved, split at chain breaks).
     ///
     /// Returns a [`ProteinBackbone`] containing one [`BackboneChain`] per
-    /// contiguous polymer segment. Chain breaks are detected by chain ID changes
-    /// or residue number gaps > 1.
-    ///
-    /// Only meaningful for protein entities; returns an empty backbone for
-    /// other molecule types.
+    /// contiguous polymer segment.
     pub fn extract_backbone(&self) -> ProteinBackbone {
         if self.molecule_type != MoleculeType::Protein {
             return ProteinBackbone {
@@ -401,52 +638,50 @@ impl MoleculeEntity {
             };
         }
 
+        let data = match &self.kind {
+            EntityKind::Polymer(data) => data,
+            _ => {
+                return ProteinBackbone {
+                    chains: Vec::new(),
+                    chain_ids: Vec::new(),
+                }
+            }
+        };
+
         let mut chains: Vec<Vec<Vec3>> = Vec::new();
         let mut chain_ids: Vec<u8> = Vec::new();
-        let mut current_chain: Vec<Vec3> = Vec::new();
-        let mut current_chain_id: Option<u8> = None;
-        let mut last_chain_id: Option<u8> = None;
-        let mut last_res_num: Option<i32> = None;
 
-        for i in 0..self.coords.num_atoms {
-            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
-                .unwrap_or("")
-                .trim();
+        for polymer_chain in &data.chains {
+            let mut current_chain: Vec<Vec3> = Vec::new();
+            let mut last_res_num: Option<i32> = None;
 
-            if atom_name != "N" && atom_name != "CA" && atom_name != "C" {
-                continue;
-            }
+            for residue in &polymer_chain.residues {
+                // Check for sequence gap → chain break
+                let is_sequence_gap =
+                    last_res_num.is_some_and(|r| (residue.number - r).abs() > 1);
 
-            let chain_id = self.coords.chain_ids[i];
-            let res_num = self.coords.res_nums[i];
-            let a = &self.coords.atoms[i];
-            let pos = Vec3::new(a.x, a.y, a.z);
-
-            let is_chain_break = last_chain_id.is_some_and(|c| c != chain_id);
-            let is_sequence_gap = last_res_num.is_some_and(|r| (res_num - r).abs() > 1);
-
-            if (is_chain_break || is_sequence_gap) && !current_chain.is_empty() {
-                chains.push(std::mem::take(&mut current_chain));
-                if let Some(cid) = current_chain_id.take() {
-                    chain_ids.push(cid);
+                if is_sequence_gap && !current_chain.is_empty() {
+                    chains.push(std::mem::take(&mut current_chain));
+                    chain_ids.push(polymer_chain.chain_id);
                 }
-            }
 
-            current_chain.push(pos);
-
-            if atom_name == "CA" {
-                if current_chain_id.is_none() {
-                    current_chain_id = Some(chain_id);
+                // Collect backbone atoms (N, CA, C) for this residue
+                for idx in residue.atom_range.clone() {
+                    let atom_name = std::str::from_utf8(&data.atoms.atom_names[idx])
+                        .unwrap_or("")
+                        .trim();
+                    if atom_name == "N" || atom_name == "CA" || atom_name == "C" {
+                        let a = &data.atoms.atoms[idx];
+                        current_chain.push(Vec3::new(a.x, a.y, a.z));
+                    }
                 }
-                last_res_num = Some(res_num);
-            }
-            last_chain_id = Some(chain_id);
-        }
 
-        if !current_chain.is_empty() {
-            chains.push(current_chain);
-            if let Some(cid) = current_chain_id {
-                chain_ids.push(cid);
+                last_res_num = Some(residue.number);
+            }
+
+            if !current_chain.is_empty() {
+                chains.push(current_chain);
+                chain_ids.push(polymer_chain.chain_id);
             }
         }
 
@@ -457,12 +692,6 @@ impl MoleculeEntity {
     }
 
     /// Extract sidechain atom data with topology.
-    ///
-    /// `is_hydrophobic` classifies a residue name (e.g. "ALA") as hydrophobic.
-    /// `get_bonds` returns intra-residue bond pairs for a residue name.
-    ///
-    /// Produces a [`SidechainAtoms`] with positions, bonds, and backbone-sidechain
-    /// (CA→CB) connections. Hydrogen atoms are excluded.
     pub fn extract_sidechains<F, G>(&self, is_hydrophobic: F, get_bonds: G) -> SidechainAtoms
     where
         F: Fn(&str) -> bool,
@@ -471,6 +700,11 @@ impl MoleculeEntity {
         if self.molecule_type != MoleculeType::Protein {
             return SidechainAtoms::default();
         }
+
+        let data = match &self.kind {
+            EntityKind::Polymer(data) => data,
+            _ => return SidechainAtoms::default(),
+        };
 
         let mut atoms_out: Vec<SidechainAtomData> = Vec::new();
         let mut bonds_out: Vec<(u32, u32)> = Vec::new();
@@ -483,94 +717,97 @@ impl MoleculeEntity {
         let mut next_residue_idx: u32 = 0;
 
         // First pass: collect sidechain atoms and assign residue indices
-        for i in 0..self.coords.num_atoms {
-            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let chain_id = self.coords.chain_ids[i];
-            let res_num = self.coords.res_nums[i];
-            let res_name = std::str::from_utf8(&self.coords.res_names[i])
-                .unwrap_or("UNK")
-                .trim();
-            let a = &self.coords.atoms[i];
-            let pos = Vec3::new(a.x, a.y, a.z);
-            let res_key = (chain_id, res_num);
+        for chain in &data.chains {
+            for residue in &chain.residues {
+                let res_name = std::str::from_utf8(&residue.name)
+                    .unwrap_or("UNK")
+                    .trim();
+                let res_key = (chain.chain_id, residue.number);
 
-            match atom_name.as_str() {
-                "CA" => {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        residue_idx_map.entry(res_key)
-                    {
-                        e.insert(next_residue_idx);
-                        next_residue_idx += 1;
-                    }
-                }
-                "N" | "C" | "O" => {}
-                _ => {
-                    // Skip hydrogens
-                    let is_hydrogen = atom_name.starts_with('H')
-                        || atom_name.starts_with("1H")
-                        || atom_name.starts_with("2H")
-                        || atom_name.starts_with("3H")
-                        || (atom_name.len() >= 2
-                            && atom_name.chars().next().unwrap().is_ascii_digit()
-                            && atom_name.chars().nth(1) == Some('H'));
+                for idx in residue.atom_range.clone() {
+                    let atom_name = std::str::from_utf8(&data.atoms.atom_names[idx])
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    let a = &data.atoms.atoms[idx];
+                    let pos = Vec3::new(a.x, a.y, a.z);
 
-                    if !is_hydrogen {
-                        let sidechain_idx = atoms_out.len() as u32;
-                        atom_index_map
-                            .insert((chain_id, res_num, atom_name.clone()), sidechain_idx);
+                    match atom_name.as_str() {
+                        "CA" => {
+                            if let std::collections::hash_map::Entry::Vacant(e) =
+                                residue_idx_map.entry(res_key)
+                            {
+                                e.insert(next_residue_idx);
+                                next_residue_idx += 1;
+                            }
+                        }
+                        "N" | "C" | "O" => {}
+                        _ => {
+                            // Skip hydrogens
+                            let is_hydrogen = atom_name.starts_with('H')
+                                || atom_name.starts_with("1H")
+                                || atom_name.starts_with("2H")
+                                || atom_name.starts_with("3H")
+                                || (atom_name.len() >= 2
+                                    && atom_name.chars().next().unwrap().is_ascii_digit()
+                                    && atom_name.chars().nth(1) == Some('H'));
 
-                        let residue_idx = residue_idx_map.get(&res_key).copied().unwrap_or(0);
-                        let hydrophobic = is_hydrophobic(res_name);
+                            if !is_hydrogen {
+                                let sidechain_idx = atoms_out.len() as u32;
+                                atom_index_map.insert(
+                                    (chain.chain_id, residue.number, atom_name.clone()),
+                                    sidechain_idx,
+                                );
 
-                        atoms_out.push(SidechainAtomData {
-                            position: pos,
-                            residue_idx,
-                            atom_name,
-                            is_hydrophobic: hydrophobic,
-                        });
+                                let residue_idx =
+                                    residue_idx_map.get(&res_key).copied().unwrap_or(0);
+                                let hydrophobic = is_hydrophobic(res_name);
+
+                                atoms_out.push(SidechainAtomData {
+                                    position: pos,
+                                    residue_idx,
+                                    atom_name,
+                                    is_hydrophobic: hydrophobic,
+                                });
+                            }
+                        }
                     }
                 }
             }
         }
 
         // Second pass: generate CA→CB backbone-sidechain bonds
-        for i in 0..self.coords.num_atoms {
-            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
-                .unwrap_or("")
-                .trim();
-            if atom_name == "CA" {
-                let a = &self.coords.atoms[i];
-                let ca_pos = Vec3::new(a.x, a.y, a.z);
-                let chain_id = self.coords.chain_ids[i];
-                let res_num = self.coords.res_nums[i];
-                let cb_key = (chain_id, res_num, "CB".to_string());
-                if let Some(&cb_idx) = atom_index_map.get(&cb_key) {
-                    backbone_bonds.push((ca_pos, cb_idx));
+        for chain in &data.chains {
+            for residue in &chain.residues {
+                for idx in residue.atom_range.clone() {
+                    let atom_name = std::str::from_utf8(&data.atoms.atom_names[idx])
+                        .unwrap_or("")
+                        .trim();
+                    if atom_name == "CA" {
+                        let a = &data.atoms.atoms[idx];
+                        let ca_pos = Vec3::new(a.x, a.y, a.z);
+                        let cb_key =
+                            (chain.chain_id, residue.number, "CB".to_string());
+                        if let Some(&cb_idx) = atom_index_map.get(&cb_key) {
+                            backbone_bonds.push((ca_pos, cb_idx));
+                        }
+                    }
                 }
             }
         }
 
         // Third pass: generate intra-residue sidechain bonds from topology
-        let mut seen_residues: std::collections::HashSet<(u8, i32)> =
-            std::collections::HashSet::new();
-        for i in 0..self.coords.num_atoms {
-            let atom_name = std::str::from_utf8(&self.coords.atom_names[i])
-                .unwrap_or("")
-                .trim();
-            let chain_id = self.coords.chain_ids[i];
-            let res_num = self.coords.res_nums[i];
-            let res_name = std::str::from_utf8(&self.coords.res_names[i])
-                .unwrap_or("UNK")
-                .trim();
-
-            if atom_name == "CA" && seen_residues.insert((chain_id, res_num)) {
+        for chain in &data.chains {
+            for residue in &chain.residues {
+                let res_name = std::str::from_utf8(&residue.name)
+                    .unwrap_or("UNK")
+                    .trim();
                 if let Some(residue_bonds) = get_bonds(res_name) {
                     for (a1, a2) in residue_bonds {
-                        let key1 = (chain_id, res_num, a1.to_string());
-                        let key2 = (chain_id, res_num, a2.to_string());
+                        let key1 =
+                            (chain.chain_id, residue.number, a1.to_string());
+                        let key2 =
+                            (chain.chain_id, residue.number, a2.to_string());
                         if let (Some(&idx1), Some(&idx2)) =
                             (atom_index_map.get(&key1), atom_index_map.get(&key2))
                         {
@@ -593,10 +830,6 @@ impl MoleculeEntity {
 const DNA_RESIDUES: &[&str] = &["DA", "DC", "DG", "DT", "DU", "DI", "THY"];
 
 /// Standard RNA residue names.
-/// Single-letter names (A, C, G, U) are the mmCIF standard for RNA.
-/// Three-letter variants (ADE, CYT, GUA, URA) are legacy PDB conventions
-/// and also used by Rosetta for DNA exports (acceptable: both use NA renderer).
-/// RAD/RCY/RGU are Rosetta internal names for RNA returned by the C++ backend.
 const RNA_RESIDUES: &[&str] = &[
     "A", "C", "G", "U", "ADE", "CYT", "GUA", "URA", "I", "RAD", "RCY", "RGU",
 ];
@@ -615,8 +848,6 @@ const ION_RESIDUES: &[&str] = &[
 ];
 
 /// Known lipid residue 3-char truncated names.
-/// Covers common lipids from CHARMM, AMBER, and GROMACS force fields.
-/// Names are truncated to 3 characters to match PDB residue name conventions.
 const LIPID_RESIDUES: &[&str] = &[
     // Phosphatidylcholines (DPPC, POPC, DOPC, DMPC, DSPC, DLPC)
     "DPP", "POP", "DOP", "DMP", "DSP", "DLP",
@@ -638,7 +869,6 @@ const LIPID_RESIDUES: &[&str] = &[
 ];
 
 /// Known cofactor residue names (exact match, checked before lipid truncation).
-/// Covers porphyrins, quinones, nucleotide cofactors, and iron-sulfur clusters.
 const COFACTOR_RESIDUES: &[&str] = &[
     // Porphyrins / chlorins
     "HEM", "HEC", "HEA", "HEB", "CLA", "CHL", "PHO", "BCR", "BCB", // Quinones
@@ -693,6 +923,14 @@ fn cofactor_display_name(res_name: &str) -> &str {
     }
 }
 
+/// Display name for a small molecule, dispatching by molecule type.
+fn small_molecule_display_name(mol_type: MoleculeType, res_name: &str) -> String {
+    match mol_type {
+        MoleculeType::Cofactor => cofactor_display_name(res_name).to_string(),
+        _ => res_name.to_string(),
+    }
+}
+
 /// Classify a residue name into a `MoleculeType`.
 ///
 /// The name should be trimmed of whitespace before calling.
@@ -730,22 +968,21 @@ pub fn classify_residue(name: &str) -> MoleculeType {
     MoleculeType::Ligand
 }
 
+// ---------------------------------------------------------------------------
+// Entity splitting / merging
+// ---------------------------------------------------------------------------
+
 /// Key for grouping atoms into entities.
-/// We use chain_id + molecule_type, except Water/Solvent which are consolidated.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EntityKey {
     /// A polymeric chain (protein, DNA, RNA) on a specific chain.
     Chain(u8, MoleculeTypeOrd),
     /// All water molecules consolidated into one entity.
     Water,
-    /// All lipid molecules consolidated into one entity.
-    Lipid,
     /// All solvent molecules consolidated into one entity.
     Solvent,
-    /// Cofactors grouped by residue name (e.g. all CLA → one entity).
-    Cofactor([u8; 3]),
-    /// A non-polymer residue (ligand, ion) keyed by chain + residue number.
-    NonPolymer(u8, i32, MoleculeTypeOrd),
+    /// A single non-polymer molecule, keyed by (chain_id, res_num, type).
+    SmallMolecule(u8, i32, MoleculeTypeOrd),
 }
 
 /// Wrapper for MoleculeType that implements Ord (for BTreeMap keys).
@@ -769,7 +1006,8 @@ impl Ord for MoleculeTypeOrd {
 /// Grouping rules:
 /// - Protein/DNA/RNA: grouped by (chain_id, molecule_type) — each polymer chain is one entity
 /// - Water: all water residues are consolidated into a single entity
-/// - Ligand/Ion: each unique (chain_id, res_num) is its own entity
+/// - Solvent: all solvent residues are consolidated into a single entity
+/// - Ligand/Ion/Cofactor/Lipid: each unique (chain_id, res_num) is its own entity
 ///
 /// Entity IDs are assigned sequentially starting from 0.
 pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
@@ -785,15 +1023,16 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
 
         let key = match mol_type {
             MoleculeType::Water => EntityKey::Water,
-            MoleculeType::Lipid => EntityKey::Lipid,
             MoleculeType::Solvent => EntityKey::Solvent,
-            MoleculeType::Cofactor => EntityKey::Cofactor(coords.res_names[i]),
             MoleculeType::Protein | MoleculeType::DNA | MoleculeType::RNA => {
                 EntityKey::Chain(chain_id, MoleculeTypeOrd(mol_type))
             }
-            MoleculeType::Ligand | MoleculeType::Ion => {
+            MoleculeType::Ligand
+            | MoleculeType::Ion
+            | MoleculeType::Cofactor
+            | MoleculeType::Lipid => {
                 let res_num = coords.res_nums[i];
-                EntityKey::NonPolymer(chain_id, res_num, MoleculeTypeOrd(mol_type))
+                EntityKey::SmallMolecule(chain_id, res_num, MoleculeTypeOrd(mol_type))
             }
         };
 
@@ -806,27 +1045,58 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
         .enumerate()
         .map(|(entity_id, (key, indices))| {
             let mol_type = match &key {
-                EntityKey::Chain(_, mt) | EntityKey::NonPolymer(_, _, mt) => mt.0,
+                EntityKey::Chain(_, mt) | EntityKey::SmallMolecule(_, _, mt) => mt.0,
                 EntityKey::Water => MoleculeType::Water,
-                EntityKey::Lipid => MoleculeType::Lipid,
                 EntityKey::Solvent => MoleculeType::Solvent,
-                EntityKey::Cofactor(_) => MoleculeType::Cofactor,
             };
 
-            let mut atoms = Vec::with_capacity(indices.len());
-            let mut chain_ids = Vec::with_capacity(indices.len());
-            let mut res_names = Vec::with_capacity(indices.len());
-            let mut res_nums = Vec::with_capacity(indices.len());
-            let mut atom_names = Vec::with_capacity(indices.len());
-            let mut elements = Vec::with_capacity(indices.len());
+            let kind = match mol_type {
+                MoleculeType::Protein | MoleculeType::DNA | MoleculeType::RNA => {
+                    build_polymer_kind(&indices, coords)
+                }
+                MoleculeType::Water | MoleculeType::Solvent => {
+                    build_bulk_kind(&indices, coords)
+                }
+                _ => build_small_molecule_kind(mol_type, &indices, coords),
+            };
 
-            for &idx in &indices {
-                atoms.push(coords.atoms[idx].clone());
-                chain_ids.push(coords.chain_ids[idx]);
-                res_names.push(coords.res_names[idx]);
-                res_nums.push(coords.res_nums[idx]);
-                atom_names.push(coords.atom_names[idx]);
-                elements.push(
+            MoleculeEntity {
+                entity_id: entity_id as u32,
+                molecule_type: mol_type,
+                kind,
+            }
+        })
+        .collect()
+}
+
+/// Build `EntityKind::Polymer` from a set of atom indices belonging to one
+/// polymer chain.
+fn build_polymer_kind(indices: &[usize], coords: &Coords) -> EntityKind {
+    // Group atoms by (chain_id, res_num) preserving insertion order within each
+    let mut chain_residue_map: BTreeMap<u8, BTreeMap<i32, Vec<usize>>> = BTreeMap::new();
+    for &idx in indices {
+        chain_residue_map
+            .entry(coords.chain_ids[idx])
+            .or_default()
+            .entry(coords.res_nums[idx])
+            .or_default()
+            .push(idx);
+    }
+
+    let mut atom_set_atoms = Vec::with_capacity(indices.len());
+    let mut atom_set_names = Vec::with_capacity(indices.len());
+    let mut atom_set_elements = Vec::with_capacity(indices.len());
+    let mut chains = Vec::new();
+
+    for (&chain_id, residues) in &chain_residue_map {
+        let mut chain_residues = Vec::new();
+        for (&res_num, atom_indices) in residues {
+            let start = atom_set_atoms.len();
+            let res_name = coords.res_names[atom_indices[0]];
+            for &idx in atom_indices {
+                atom_set_atoms.push(coords.atoms[idx].clone());
+                atom_set_names.push(coords.atom_names[idx]);
+                atom_set_elements.push(
                     coords
                         .elements
                         .get(idx)
@@ -834,22 +1104,119 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
                         .unwrap_or(Element::Unknown),
                 );
             }
+            let end = atom_set_atoms.len();
+            chain_residues.push(Residue {
+                name: res_name,
+                number: res_num,
+                atom_range: start..end,
+            });
+        }
+        chains.push(PolymerChain {
+            chain_id,
+            residues: chain_residues,
+        });
+    }
 
-            MoleculeEntity {
-                entity_id: entity_id as u32,
-                molecule_type: mol_type,
-                coords: Coords {
-                    num_atoms: atoms.len(),
-                    atoms,
-                    chain_ids,
-                    res_names,
-                    res_nums,
-                    atom_names,
-                    elements,
-                },
-            }
-        })
-        .collect()
+    EntityKind::Polymer(PolymerData {
+        atoms: AtomSet {
+            atoms: atom_set_atoms,
+            atom_names: atom_set_names,
+            elements: atom_set_elements,
+        },
+        chains,
+    })
+}
+
+/// Build `EntityKind::SmallMolecule` from a set of atom indices.
+fn build_small_molecule_kind(
+    mol_type: MoleculeType,
+    indices: &[usize],
+    coords: &Coords,
+) -> EntityKind {
+    let mut atoms = Vec::with_capacity(indices.len());
+    let mut atom_names = Vec::with_capacity(indices.len());
+    let mut elements = Vec::with_capacity(indices.len());
+
+    for &idx in indices {
+        atoms.push(coords.atoms[idx].clone());
+        atom_names.push(coords.atom_names[idx]);
+        elements.push(
+            coords
+                .elements
+                .get(idx)
+                .copied()
+                .unwrap_or(Element::Unknown),
+        );
+    }
+
+    let residue_name = coords.res_names[indices[0]];
+    let rn_str = std::str::from_utf8(&residue_name).unwrap_or("???").trim();
+    let display_name = small_molecule_display_name(mol_type, rn_str);
+
+    EntityKind::SmallMolecule {
+        atoms: AtomSet {
+            atoms,
+            atom_names,
+            elements,
+        },
+        residue_name,
+        display_name,
+    }
+}
+
+/// Build `EntityKind::Bulk` from a set of atom indices (water/solvent).
+fn build_bulk_kind(indices: &[usize], coords: &Coords) -> EntityKind {
+    let mut atoms = Vec::with_capacity(indices.len());
+    let mut atom_names = Vec::with_capacity(indices.len());
+    let mut elements = Vec::with_capacity(indices.len());
+
+    // Count unique (chain_id, res_num) pairs for molecule_count
+    let mut seen = std::collections::HashSet::new();
+    for &idx in indices {
+        atoms.push(coords.atoms[idx].clone());
+        atom_names.push(coords.atom_names[idx]);
+        elements.push(
+            coords
+                .elements
+                .get(idx)
+                .copied()
+                .unwrap_or(Element::Unknown),
+        );
+        seen.insert((coords.chain_ids[idx], coords.res_nums[idx]));
+    }
+
+    let residue_name = coords.res_names[indices[0]];
+
+    EntityKind::Bulk {
+        atoms: AtomSet {
+            atoms,
+            atom_names,
+            elements,
+        },
+        residue_name,
+        molecule_count: seen.len(),
+    }
+}
+
+/// Convert flat `Coords` + molecule type into an `EntityKind`.
+///
+/// Use this when you have raw Coords from deserialization and need to
+/// construct the appropriate EntityKind based on molecule type.
+pub fn coords_to_entity_kind(mol_type: MoleculeType, coords: Coords) -> EntityKind {
+    match mol_type {
+        MoleculeType::Protein | MoleculeType::DNA | MoleculeType::RNA => {
+            let indices: Vec<usize> = (0..coords.num_atoms).collect();
+            build_polymer_kind(&indices, &coords)
+        }
+        MoleculeType::Water | MoleculeType::Solvent => {
+            let indices: Vec<usize> = (0..coords.num_atoms).collect();
+            build_bulk_kind(&indices, &coords)
+        }
+        _ => {
+            let indices: Vec<usize> = (0..coords.num_atoms).collect();
+            build_small_molecule_kind(mol_type, &indices, &coords)
+        }
+    }
 }
 
 /// Merge multiple entities back into a single flat `Coords`.
@@ -857,7 +1224,7 @@ pub fn split_into_entities(coords: &Coords) -> Vec<MoleculeEntity> {
 /// Entities are concatenated in order. Useful for recombining before
 /// sending to backends that expect a single coordinate set (e.g., Rosetta).
 pub fn merge_entities(entities: &[MoleculeEntity]) -> Coords {
-    let total_atoms: usize = entities.iter().map(|e| e.coords.num_atoms).sum();
+    let total_atoms: usize = entities.iter().map(|e| e.atom_count()).sum();
 
     let mut atoms = Vec::with_capacity(total_atoms);
     let mut chain_ids = Vec::with_capacity(total_atoms);
@@ -867,12 +1234,13 @@ pub fn merge_entities(entities: &[MoleculeEntity]) -> Coords {
     let mut elements = Vec::with_capacity(total_atoms);
 
     for entity in entities {
-        atoms.extend(entity.coords.atoms.iter().cloned());
-        chain_ids.extend_from_slice(&entity.coords.chain_ids);
-        res_names.extend_from_slice(&entity.coords.res_names);
-        res_nums.extend_from_slice(&entity.coords.res_nums);
-        atom_names.extend_from_slice(&entity.coords.atom_names);
-        elements.extend_from_slice(&entity.coords.elements);
+        let c = entity.to_coords();
+        atoms.extend(c.atoms);
+        chain_ids.extend(c.chain_ids);
+        res_names.extend(c.res_names);
+        res_nums.extend(c.res_nums);
+        atom_names.extend(c.atom_names);
+        elements.extend(c.elements);
     }
 
     Coords {
@@ -897,7 +1265,7 @@ pub fn extract_by_type(entities: &[MoleculeEntity], mol_type: MoleculeType) -> O
         return None;
     }
 
-    let total_atoms: usize = matching.iter().map(|e| e.coords.num_atoms).sum();
+    let total_atoms: usize = matching.iter().map(|e| e.atom_count()).sum();
     let mut atoms = Vec::with_capacity(total_atoms);
     let mut chain_ids = Vec::with_capacity(total_atoms);
     let mut res_names = Vec::with_capacity(total_atoms);
@@ -906,12 +1274,13 @@ pub fn extract_by_type(entities: &[MoleculeEntity], mol_type: MoleculeType) -> O
     let mut elements = Vec::with_capacity(total_atoms);
 
     for entity in matching {
-        atoms.extend(entity.coords.atoms.iter().cloned());
-        chain_ids.extend_from_slice(&entity.coords.chain_ids);
-        res_names.extend_from_slice(&entity.coords.res_names);
-        res_nums.extend_from_slice(&entity.coords.res_nums);
-        atom_names.extend_from_slice(&entity.coords.atom_names);
-        elements.extend_from_slice(&entity.coords.elements);
+        let c = entity.to_coords();
+        atoms.extend(c.atoms);
+        chain_ids.extend(c.chain_ids);
+        res_names.extend(c.res_names);
+        res_nums.extend(c.res_nums);
+        atom_names.extend(c.atom_names);
+        elements.extend(c.elements);
     }
 
     Some(Coords {
@@ -928,7 +1297,6 @@ pub fn extract_by_type(entities: &[MoleculeEntity], mol_type: MoleculeType) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::coords::CoordsAtom;
 
     fn make_atom(x: f32) -> CoordsAtom {
         CoordsAtom {
@@ -1013,7 +1381,11 @@ mod tests {
         let entities = split_into_entities(&coords);
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].molecule_type, MoleculeType::Protein);
-        assert_eq!(entities[0].coords.num_atoms, 6);
+        assert_eq!(entities[0].atom_count(), 6);
+        assert!(entities[0].as_polymer().is_some());
+        let data = entities[0].as_polymer().unwrap();
+        assert_eq!(data.chains.len(), 1);
+        assert_eq!(data.chains[0].residues.len(), 2);
     }
 
     #[test]
@@ -1048,20 +1420,21 @@ mod tests {
             .iter()
             .find(|e| e.molecule_type == MoleculeType::Protein)
             .unwrap();
-        assert_eq!(protein.coords.num_atoms, 2);
+        assert_eq!(protein.atom_count(), 2);
 
         let water = entities
             .iter()
             .find(|e| e.molecule_type == MoleculeType::Water)
             .unwrap();
-        assert_eq!(water.coords.num_atoms, 2);
+        assert_eq!(water.atom_count(), 2);
 
-        // ATP is now classified as Cofactor
+        // ATP is now classified as Cofactor → SmallMolecule
         let cofactor = entities
             .iter()
             .find(|e| e.molecule_type == MoleculeType::Cofactor)
             .unwrap();
-        assert_eq!(cofactor.coords.num_atoms, 1);
+        assert_eq!(cofactor.atom_count(), 1);
+        assert!(matches!(cofactor.kind, EntityKind::SmallMolecule { .. }));
     }
 
     #[test]
@@ -1136,7 +1509,7 @@ mod tests {
 
     #[test]
     fn test_split_cofactor_grouping() {
-        // Two CLA residues on different chains should become one Cofactor entity
+        // Two CLA residues on different chains should become 2 separate SmallMolecule entities
         let coords = Coords {
             num_atoms: 4,
             atoms: (0..4).map(|i| make_atom(i as f32)).collect(),
@@ -1158,10 +1531,13 @@ mod tests {
         };
 
         let entities = split_into_entities(&coords);
-        // All CLA atoms go to one Cofactor entity (grouped by res_name)
-        assert_eq!(entities.len(), 1);
+        // Each (chain_id, res_num) pair produces its own SmallMolecule entity
+        assert_eq!(entities.len(), 2);
         assert_eq!(entities[0].molecule_type, MoleculeType::Cofactor);
-        assert_eq!(entities[0].coords.num_atoms, 4);
+        assert_eq!(entities[1].molecule_type, MoleculeType::Cofactor);
+        assert_eq!(entities[0].atom_count(), 2);
+        assert_eq!(entities[1].atom_count(), 2);
+        assert!(matches!(entities[0].kind, EntityKind::SmallMolecule { .. }));
     }
 
     #[test]
@@ -1180,7 +1556,109 @@ mod tests {
         let entities = split_into_entities(&coords);
         assert_eq!(entities.len(), 1);
         assert_eq!(entities[0].molecule_type, MoleculeType::Solvent);
-        assert_eq!(entities[0].coords.num_atoms, 3);
+        assert_eq!(entities[0].atom_count(), 3);
+        assert!(matches!(entities[0].kind, EntityKind::Bulk { .. }));
+    }
+
+    #[test]
+    fn test_polymer_structure() {
+        let coords = Coords {
+            num_atoms: 6,
+            atoms: (0..6).map(|i| make_atom(i as f32)).collect(),
+            chain_ids: vec![b'A', b'A', b'A', b'A', b'A', b'A'],
+            res_names: vec![
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
+            ],
+            res_nums: vec![1, 1, 1, 2, 2, 2],
+            atom_names: vec![
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+            ],
+            elements: vec![Element::Unknown; 6],
+        };
+
+        let entities = split_into_entities(&coords);
+        assert_eq!(entities.len(), 1);
+        let data = entities[0].as_polymer().unwrap();
+        assert_eq!(data.chains.len(), 1);
+        assert_eq!(data.chains[0].chain_id, b'A');
+        assert_eq!(data.chains[0].residues.len(), 2);
+        assert_eq!(data.chains[0].residues[0].name, res_name("ALA"));
+        assert_eq!(data.chains[0].residues[0].number, 1);
+        assert_eq!(data.chains[0].residues[0].atom_range, 0..3);
+        assert_eq!(data.chains[0].residues[1].name, res_name("GLY"));
+        assert_eq!(data.chains[0].residues[1].number, 2);
+        assert_eq!(data.chains[0].residues[1].atom_range, 3..6);
+    }
+
+    #[test]
+    fn test_small_molecule_no_chain_residue() {
+        let coords = Coords {
+            num_atoms: 1,
+            atoms: vec![make_atom(1.0)],
+            chain_ids: vec![b'A'],
+            res_names: vec![res_name("ZN")],
+            res_nums: vec![300],
+            atom_names: vec![atom_name("ZN")],
+            elements: vec![Element::Zn],
+        };
+
+        let entities = split_into_entities(&coords);
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].molecule_type, MoleculeType::Ion);
+        match &entities[0].kind {
+            EntityKind::SmallMolecule {
+                atoms,
+                residue_name,
+                ..
+            } => {
+                assert_eq!(atoms.len(), 1);
+                assert_eq!(*residue_name, res_name("ZN"));
+            }
+            _ => panic!("expected SmallMolecule"),
+        }
+    }
+
+    #[test]
+    fn test_to_coords_roundtrip() {
+        let coords = Coords {
+            num_atoms: 6,
+            atoms: (0..6).map(|i| make_atom(i as f32)).collect(),
+            chain_ids: vec![b'A', b'A', b'A', b'A', b'A', b'A'],
+            res_names: vec![
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
+            ],
+            res_nums: vec![1, 1, 1, 2, 2, 2],
+            atom_names: vec![
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+            ],
+            elements: vec![Element::Unknown; 6],
+        };
+
+        let entities = split_into_entities(&coords);
+        let recovered = entities[0].to_coords();
+        assert_eq!(recovered.num_atoms, 6);
+        assert_eq!(recovered.chain_ids, vec![b'A'; 6]);
+        assert_eq!(recovered.res_nums, vec![1, 1, 1, 2, 2, 2]);
     }
 
     #[test]
