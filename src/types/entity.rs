@@ -1775,4 +1775,47 @@ mod tests {
         let expected_radius = glam::Vec3::new(4.0, 6.0, 8.0).length() * 0.5;
         assert!((aabb.radius() - expected_radius).abs() < 1e-6);
     }
+
+    #[test]
+    fn test_split_modified_amino_acid_merges_into_protein() {
+        // SEP (phosphoserine) on a protein chain should merge into the protein
+        // entity, not create a separate SmallMolecule.
+        let coords = Coords {
+            num_atoms: 9,
+            atoms: (0..9).map(|i| make_atom(i as f32)).collect(),
+            chain_ids: vec![b'A'; 9],
+            res_names: vec![
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("ALA"),
+                res_name("SEP"),
+                res_name("SEP"),
+                res_name("SEP"),
+                res_name("GLY"),
+                res_name("GLY"),
+                res_name("GLY"),
+            ],
+            res_nums: vec![1, 1, 1, 2, 2, 2, 3, 3, 3],
+            atom_names: vec![
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+                atom_name("N"),
+                atom_name("CA"),
+                atom_name("C"),
+            ],
+            elements: vec![Element::Unknown; 9],
+        };
+
+        let entities = split_into_entities(&coords);
+        // Should be 1 protein entity with all 9 atoms, not 1 protein + 1 ligand
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].molecule_type, MoleculeType::Protein);
+        assert_eq!(entities[0].atom_count(), 9);
+        let data = entities[0].as_polymer().unwrap();
+        assert_eq!(data.chains[0].residues.len(), 3);
+    }
 }
